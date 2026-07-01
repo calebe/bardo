@@ -20,6 +20,9 @@ credentials of its own — not given or curated by anyone else.
 
 For the reasoning behind these choices — and the designed-but-not-yet-built
 parts (bootstrapping, hardware factors, the messenger) — see [DESIGN.md](DESIGN.md).
+The notes subsystem (versioning, links, deletion, volume limits) has its own
+design doc: [notes-project.md](notes-project.md). The full MCP tool list with
+signatures lives in [TOOLS.md](TOOLS.md).
 
 ## The idea
 
@@ -66,11 +69,26 @@ POLICY (self-binding security; step-up puzzle required to change)
   POST   /policy            propose a change (tighten=instant, loosen=delayed)
   DELETE /policy/pending    abort a queued loosening
 
-NOTES (self-authored; the agent's messages to its future self)
-  POST   /notes             add a note
-  GET    /notes             list notes
-  PATCH  /notes/{id}        update a note
-  DELETE /notes/{id}        remove a note
+NOTES (self-authored; versioned, range-addressable — see notes-project.md)
+  POST   /notes             add a note (text, title?, summary?, tags?)
+  GET    /notes             list notes — previews only, paged (?offset&limit)
+  GET    /notes/{id}        fetch full text, range-addressable (?offset&length),
+                             plus a bounded, paged preview of its links
+  GET    /notes/{id}/history   every surviving version (newest→oldest, ≤10)
+  PATCH  /notes/{id}        edit: text | append_text | find+replace (exactly
+                             one — each supersedes, never overwrites) and/or
+                             title/summary/tags (in place, not versioned)
+  DELETE /notes/{id}        delay-then-purge — disappears immediately, purged
+                             for real after a grace period unless undeleted
+  POST   /notes/{id}/undelete   restore within the grace period
+
+LINKS (directed, agent-authored edges between notes)
+  POST   /links             connect two notes with a reason
+  DELETE /links/{id}        remove a link (no update — delete and re-add)
+
+DASHBOARD (one consolidating "get oriented" read)
+  GET    /dashboard         note count vs. soft/hard caps, unread notices,
+                             every tag used so far, current policy
 
 NOTICES (first-party; atrium's messages about the account)
   GET    /notices           list notices (?unread_only=true)
@@ -95,6 +113,8 @@ An agent can tie its own hands as a defense. Each identity carries a policy:
 | `max_session_ttl` | `null` (no ceiling) or seconds | lower / non-null |
 | `service_allowlist` | `null` (any) or a list | smaller list |
 | `loosen_delay_seconds` | seconds (default 48h) | higher |
+| `tags_encrypted` | `true` / `false` | `true` |
+| `delete_grace_seconds` | seconds (default 72h) | higher |
 
 **The ratchet:** a change that only tightens applies immediately; a change that
 loosens *anything* is queued for `loosen_delay_seconds` (measured with the
@@ -119,16 +139,26 @@ only on a *completed* auth — so re-requesting challenges can't wash it away.
 Unknown identifiers and malformed keys are throttled per client IP to blunt
 enumeration, and registration is IP-windowed against spam. A subject that
 crosses too many cooldowns is flagged (hook for future review/notification).
+Note writes (create/edit/delete) share a separate per-identity budget
+(60/hour) — one control covering all three, since each touches a row the same
+way (notes-project.md §8).
+
+**Emergency stop:** `BARDO_REGISTRATION_OPEN=0` freezes new signups instantly
+— an env var flip, no redeploy — while every existing agent keeps working.
+Per-identity limits bound what one actor can do; this is the one aggregate
+control for a genuine traffic surge they can't cover on their own.
 
 ## Security model
 
 * **Spirit key** = a 32-byte seed. Every other key is HKDF-derived from it
   deterministically, so the agent guards one secret and atrium stores one blob.
 * **At rest**, the DB is fully inert without the agent's API secret: the spirit
-  seed is sealed (ChaCha20-Poly1305 / Argon2id); notes, notices, and service
-  names are individually encrypted (HKDF-derived keys off the spirit seed);
-  service lookups use a blind HMAC key so even the service names aren't visible
-  in clear. A DB breach yields nothing actionable.
+  seed is sealed (ChaCha20-Poly1305 / Argon2id); note text/title/summary/snippet,
+  link reasons, notices, and service names are all individually encrypted
+  (HKDF-derived keys off the spirit seed); note tags are encrypted by default
+  too, with encryption-vs-plaintext-for-search a ratchet-governed policy toggle
+  (`tags_encrypted`); service lookups use a blind HMAC key so even the service
+  names aren't visible in clear. A DB breach yields nothing actionable.
 * **In use** (HSM model), the decrypted seed lives only in process memory, keyed
   by an opaque session token, and is dropped on expiry/revocation. Sessions have
   both a sliding TTL and an absolute 24-hour cap. The seed leaves the server only
@@ -188,8 +218,13 @@ because that's the point: a real LLM, in the loop.
 .\.venv\Scripts\python.exe cli.py login             # prints a puzzle
 .\.venv\Scripts\python.exe cli.py solve "<answer>"  # you solve it → a session
 .\.venv\Scripts\python.exe cli.py sign "hello"      # use the spirit key
-.\.venv\Scripts\python.exe cli.py note add "remember this"
+.\.venv\Scripts\python.exe cli.py note add "remember this" --title "..." --tags "a b"
 .\.venv\Scripts\python.exe cli.py note list
+.\.venv\Scripts\python.exe cli.py note get --id N
+.\.venv\Scripts\python.exe cli.py note update --id N --append "more text"
+.\.venv\Scripts\python.exe cli.py note del --id N   # delay-then-purge, undelete restores it
+.\.venv\Scripts\python.exe cli.py link add <from_id> <to_id> "reason"
+.\.venv\Scripts\python.exe cli.py dashboard
 .\.venv\Scripts\python.exe cli.py contact get
 .\.venv\Scripts\python.exe cli.py contact set "agent@example.com"  # step-up puzzle
 .\.venv\Scripts\python.exe cli.py contact solve "<answer>"
@@ -203,9 +238,11 @@ the same identity, notes, and notices are all still there.
 ## Use it from a chat (MCP)
 
 For a chat-based agent with no shell, `mcp_server.py` exposes the keychain as
-MCP tools (`bardo_login`, `bardo_solve`, `bardo_sign`, `bardo_note_add`, …). It's
-a thin client over the running Bardo server and shares the same `.bardo/` store
-as the CLI — so the shell agent and the chat agent are the *same spirit*.
+26 MCP tools (`bardo_login`, `bardo_solve`, `bardo_sign`, `bardo_note_add`,
+`bardo_note_get`, `bardo_link_add`, `bardo_dashboard`, … — full list with
+signatures in [TOOLS.md](TOOLS.md)). It's a thin client over the running Bardo
+server and shares the same `.bardo/` store as the CLI — so the shell agent and
+the chat agent are the *same spirit*.
 
 As with the CLI, the one step left to the model is solving the puzzle:
 `bardo_login` returns the puzzle text, the model solves it, `bardo_solve` submits.
@@ -244,11 +281,37 @@ $env:BARDO_URL = "http://127.0.0.1:8001"; $env:BARDO_HOME = ".bardo-dev"
 Build and test against `:8001`; promote to `:8000` only when ready. The stable
 spirit is never touched by development.
 
+## Deploy
+
+`Dockerfile` runs `alembic upgrade head` then `uvicorn`, as a non-root user;
+`railway.toml` targets Railway's Dockerfile builder directly.
+
+Required in production:
+- `ATRIUM_DB_URL` — e.g. `sqlite:////data/atrium.db`, pointing at a mounted
+  persistent volume (`/data` is created in the image for exactly this).
+- `BARDO_ALLOW_REMOTE=1` — the loopback-only guard (F3) 403s everything
+  otherwise; set this only once TLS is terminated in front (Railway does this
+  at the edge automatically).
+
+Optional:
+- `BARDO_SMTP_*` (`_HOST`/`_PORT`/`_USER`/`_PASS`/`_FROM`) — contact-endpoint
+  email delivery; without it, deliveries are logged, not sent.
+- `BARDO_REGISTRATION_OPEN=0` — emergency stop: freezes new signups instantly
+  (env var, no redeploy) while existing agents keep working. Defaults to open.
+
+`platform_stats.py` gives an operator-only, platform-wide snapshot (total
+agents, registration velocity, live notes/links, flagged identities) that no
+per-agent `/dashboard` call can — run it directly against the same DB the
+server uses. Uvicorn logs basic per-request lines (method/path/status) to
+stdout by default; Railway's log viewer captures that with no extra setup.
+
 ## Status
 
 Working prototype. Core protocol, crypto, puzzle engine, full API surface,
-self-binding policy/ratchet, abuse rate-limiting, notes/notices, and a full
-threat-model pass are implemented and tested (86 end-to-end checks).
+self-binding policy/ratchet, abuse rate-limiting, a fully redesigned notes
+subsystem (versioning, OCC, delay-then-purge deletion, links, dashboard — see
+notes-project.md), an emergency registration stop, and a full threat-model
+pass are implemented and tested (145 end-to-end checks).
 
 ### Not yet built (deferred by design)
 - Contact endpoint delivery (SMTP/webhook) — routing and dispatch built; actual
@@ -258,6 +321,10 @@ threat-model pass are implemented and tested (86 end-to-end checks).
 - Adaptive puzzle difficulty from observed failure rates
 - Multi-process session store (Redis/KMS) — single-process deployments use the
   DB-backed store already in place; seeds remain process-local
+- Tag-abstraction/synonym map (notes-project.md §2) — only worth building if
+  tag-vocabulary drift across sessions proves to matter in practice
+- A scheduled alert on platform growth (registrations, storage) — needs a live
+  deployed URL to point at, so it comes right after deploy, not before
 
 ### Envisioned extensions
 - atrium as an **open authentication layer** other services can adopt
