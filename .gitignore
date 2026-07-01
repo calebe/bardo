@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environment
+.venv/
+
+# Local databases — production DB lives on a mounted volume, not in git.
+*.db
+*.db-shm
+*.db-wal
+
+# Local credentials and session state — real per-agent secrets, never committed.
+.bardo/
+.bardo-dev/
+
+# Editor/OS cruft
+.DS_Store

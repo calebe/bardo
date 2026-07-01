@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Local databases — production DB lives on a mounted volume, not in the image.
+*.db
+*.db-shm
+*.db-wal
+
+# Local credentials and session state.
+.bardo/
+.bardo-dev/
+
+# Dev scripts not needed in the image.
+run_stable.ps1
+run_dev.ps1
+smoke_test.py
+cli.py
+mcp_server.py

@@ -1,0 +1,9 @@
+cryptography>=44
+fastapi
+uvicorn[standard]
+sqlalchemy>=2
+alembic>=1.13
+psycopg2-binary
+pydantic>=2
+httpx
+mcp
