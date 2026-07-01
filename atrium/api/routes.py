@@ -17,6 +17,7 @@ Endpoint groups:
 
 from __future__ import annotations
 
+import os
 import time
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request
@@ -172,6 +173,13 @@ def _ensure_service_allowed(db: DbSession, sess, service: str | None) -> None:
 # --------------------------------------------------------------------------- #
 @router.post("/register", response_model=schemas.RegisterResponse)
 def register(request: Request, db: DbSession = Depends(get_db)):
+    # Emergency kill-switch: flip BARDO_REGISTRATION_OPEN=0 in the environment
+    # (no redeploy needed) to freeze new signups while every existing agent
+    # keeps working normally. Bounds the one thing that drives both storage
+    # and compute cost — agent count — when per-identity rate limits alone
+    # aren't enough (e.g. a genuine, non-abusive traffic surge).
+    if os.environ.get("BARDO_REGISTRATION_OPEN", "1") == "0":
+        raise HTTPException(503, "registration is temporarily closed")
     ip = _client_ip(request)
     if not register_limiter.allow(f"ip:{ip}"):
         raise _locked(register_limiter.retry_after(f"ip:{ip}"))

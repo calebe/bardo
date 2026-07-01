@@ -98,6 +98,14 @@ api_key = r.json()["api_key"]
 root_pub = r.json()["root_public_key_b64"]
 check("api key has atr. prefix", api_key.startswith("atr."))
 
+print("\n== api: registration kill-switch (emergency stop, §panic-button) ==")
+os.environ["BARDO_REGISTRATION_OPEN"] = "0"
+r = client.post("/register")
+check("registration closed -> 503", r.status_code == 503)
+del os.environ["BARDO_REGISTRATION_OPEN"]
+r = client.post("/register")
+check("registration reopens once the switch is removed", r.status_code == 200)
+
 print("\n== api: auth challenge + solve -> session ==")
 r = client.post("/auth/challenge", json={"api_key": api_key})
 check("challenge 200", r.status_code == 200)
