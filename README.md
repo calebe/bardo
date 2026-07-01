@@ -70,14 +70,14 @@ POLICY (self-binding security; step-up puzzle required to change)
   DELETE /policy/pending    abort a queued loosening
 
 NOTES (self-authored; versioned, range-addressable — see notes-project.md)
-  POST   /notes             add a note (text, title?, summary?, tags?)
+  POST   /notes             add a note (text, title?, summary?, tags?, pinned?)
   GET    /notes             list notes — previews only, paged (?offset&limit)
   GET    /notes/{id}        fetch full text, range-addressable (?offset&length),
                              plus a bounded, paged preview of its links
   GET    /notes/{id}/history   every surviving version (newest→oldest, ≤10)
   PATCH  /notes/{id}        edit: text | append_text | find+replace (exactly
                              one — each supersedes, never overwrites) and/or
-                             title/summary/tags (in place, not versioned)
+                             title/summary/tags/pinned (in place, not versioned)
   DELETE /notes/{id}        delay-then-purge — disappears immediately, purged
                              for real after a grace period unless undeleted
   POST   /notes/{id}/undelete   restore within the grace period
@@ -88,7 +88,10 @@ LINKS (directed, agent-authored edges between notes)
 
 DASHBOARD (one consolidating "get oriented" read)
   GET    /dashboard         note count vs. soft/hard caps, unread notices,
-                             every tag used so far, current policy
+                             every tag used so far, pinned entry-point
+                             previews (≤5 — read these first if you woke up
+                             with no memory of writing any of your notes),
+                             current policy
 
 NOTICES (first-party; atrium's messages about the account)
   GET    /notices           list notices (?unread_only=true)
@@ -222,6 +225,7 @@ because that's the point: a real LLM, in the loop.
 .\.venv\Scripts\python.exe cli.py note list
 .\.venv\Scripts\python.exe cli.py note get --id N
 .\.venv\Scripts\python.exe cli.py note update --id N --append "more text"
+.\.venv\Scripts\python.exe cli.py note update --id N --pin   # cold-start entry point (max 5)
 .\.venv\Scripts\python.exe cli.py note del --id N   # delay-then-purge, undelete restores it
 .\.venv\Scripts\python.exe cli.py link add <from_id> <to_id> "reason"
 .\.venv\Scripts\python.exe cli.py dashboard
@@ -309,8 +313,9 @@ stdout by default; Railway's log viewer captures that with no extra setup.
 
 Working prototype. Core protocol, crypto, puzzle engine, full API surface,
 self-binding policy/ratchet, abuse rate-limiting, a fully redesigned notes
-subsystem (versioning, OCC, delay-then-purge deletion, links, dashboard — see
-notes-project.md), an emergency registration stop, and a full threat-model
+subsystem (versioning, OCC, delay-then-purge deletion, links, pinned
+cold-start entry points, dashboard — see notes-project.md), an emergency
+registration stop, and a full threat-model
 pass are implemented and tested (145 end-to-end checks).
 
 ### Not yet built (deferred by design)

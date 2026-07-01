@@ -564,6 +564,14 @@ def _ensure_snippet(db: DbSession, spirit_seed: bytes, n: models.Note) -> str:
     return plain
 
 
+def _preview_text(db: DbSession, spirit_seed: bytes, n: models.Note) -> str:
+    """title if set else snippet — the one fallback rule used everywhere a
+    note needs to render as a short preview (links, notes_list, pinned)."""
+    if n.title:
+        return crypto.decrypt_note_title(spirit_seed, n.title)
+    return _ensure_snippet(db, spirit_seed, n)
+
+
 def _note_view(db: DbSession, n: models.Note, spirit_seed: bytes) -> schemas.NoteView:
     return schemas.NoteView(
         id=n.id,
@@ -572,6 +580,7 @@ def _note_view(db: DbSession, n: models.Note, spirit_seed: bytes) -> schemas.Not
         summary=crypto.decrypt_note_summary(spirit_seed, n.summary) if n.summary else None,
         snippet=_ensure_snippet(db, spirit_seed, n),
         tags=_decode_tags(spirit_seed, n.tags, n.tags_encrypted),
+        pinned=n.pinned,
         created_at=n.created_at,
     )
 
@@ -615,6 +624,19 @@ def _live_note_count(db: DbSession, agent_id: str) -> int:
             models.Note.agent_id == agent_id,
             models.Note.superseded_by.is_(None),
             models.Note.pending_delete_at.is_(None),
+        )
+        .count()
+    )
+
+
+def _pinned_count(db: DbSession, agent_id: str) -> int:
+    return (
+        db.query(models.Note)
+        .filter(
+            models.Note.agent_id == agent_id,
+            models.Note.superseded_by.is_(None),
+            models.Note.pending_delete_at.is_(None),
+            models.Note.pinned.is_(True),
         )
         .count()
     )
@@ -694,6 +716,19 @@ def _compute_metadata(
     return title, summary, tags, tags_encrypted
 
 
+def _resolve_pinned(db: DbSession, agent_id: str, old: models.Note, requested: bool | None) -> bool:
+    """Carry forward unchanged if omitted (same rule as title/summary/tags).
+    Only a False->True transition needs the cap check (§8) — staying pinned
+    or unpinning never does."""
+    if requested is None:
+        return old.pinned
+    if requested and not old.pinned and _pinned_count(db, agent_id) >= schemas.PINNED_MAX:
+        raise HTTPException(
+            400, f"pinned note limit reached ({schemas.PINNED_MAX}); unpin another first"
+        )
+    return requested
+
+
 def _make_snippet_blob(sess, text_plain: str, summary_blob: bytes | None) -> bytes:
     source = crypto.decrypt_note_summary(sess.spirit_seed, summary_blob) if summary_blob else text_plain
     return crypto.encrypt_note_snippet(sess.spirit_seed, notes_logic.make_snippet(source))
@@ -709,13 +744,9 @@ def _link_preview(db: DbSession, spirit_seed: bytes, link: models.Link, viewpoin
     if head.pending_delete_at is not None:
         return schemas.LinkPreview(id=head.id, deleted=True)
 
-    preview = (
-        crypto.decrypt_note_title(spirit_seed, head.title) if head.title
-        else _ensure_snippet(db, spirit_seed, head)
-    )
     direction = None if link.is_bidi else ("out" if is_outgoing else "in")
     return schemas.LinkPreview(
-        id=head.id, deleted=False, preview=preview,
+        id=head.id, deleted=False, preview=_preview_text(db, spirit_seed, head),
         reason=crypto.decrypt_link_reason(spirit_seed, link.reason), direction=direction,
     )
 
@@ -742,6 +773,10 @@ def note_add(req: schemas.NoteCreate, sess=Depends(require_session), db: DbSessi
         raise HTTPException(
             403, f"note limit reached ({schemas.NOTES_HARD_CAP}); consolidate or delete before adding more"
         )
+    if req.pinned and _pinned_count(db, sess.identifier) >= schemas.PINNED_MAX:
+        raise HTTPException(
+            400, f"pinned note limit reached ({schemas.PINNED_MAX}); unpin another first"
+        )
     _rate_limited_write(sess.identifier)
 
     pol = resolve_policy(db, agent, sess.spirit_seed)
@@ -761,6 +796,7 @@ def note_add(req: schemas.NoteCreate, sess=Depends(require_session), db: DbSessi
         text=crypto.encrypt_note(sess.spirit_seed, req.text),
         title=title_b, summary=summary_b, snippet=snippet_b,
         tags=tags_b, tags_encrypted=tags_enc,
+        pinned=req.pinned,
         created_at=time.time(),
     )
     db.add(n)
@@ -800,6 +836,7 @@ def notes_list(
             summary=crypto.decrypt_note_summary(sess.spirit_seed, n.summary) if n.summary else None,
             snippet=_ensure_snippet(db, sess.spirit_seed, n),
             tags=_decode_tags(sess.spirit_seed, n.tags, n.tags_encrypted),
+            pinned=n.pinned,
             created_at=n.created_at,
             links=links, total_links=total_links,
         ))
@@ -829,6 +866,7 @@ def note_get(
         summary=crypto.decrypt_note_summary(sess.spirit_seed, n.summary) if n.summary else None,
         snippet=_ensure_snippet(db, sess.spirit_seed, n),
         tags=_decode_tags(sess.spirit_seed, n.tags, n.tags_encrypted),
+        pinned=n.pinned,
         created_at=n.created_at,
         text=sliced, total_length=total_length, offset=offset, length_returned=len(sliced),
         links=links, total_links=total_links, links_offset=links_offset,
@@ -879,8 +917,10 @@ def note_update(note_id: int, req: schemas.NoteUpdate, sess=Depends(require_sess
         n = _owned_note_visible(db, sess, note_id)
         _rate_limited_write(sess.identifier)
         title_b, summary_b, tags_b, tags_enc = _compute_metadata(db, sess, agent, n, req)
+        pinned = _resolve_pinned(db, sess.identifier, n, req.pinned)
         current_text = crypto.decrypt_note(sess.spirit_seed, n.text)
         n.title, n.summary, n.tags, n.tags_encrypted = title_b, summary_b, tags_b, tags_enc
+        n.pinned = pinned
         n.snippet = _make_snippet_blob(sess, current_text, summary_b)
         db.commit()
         db.refresh(n)
@@ -916,12 +956,14 @@ def note_update(note_id: int, req: schemas.NoteUpdate, sess=Depends(require_sess
         raise HTTPException(400, f"resulting text exceeds {schemas.NOTE_MAX_CHARS} chars")
 
     title_b, summary_b, tags_b, tags_enc = _compute_metadata(db, sess, agent, n, req)
+    pinned = _resolve_pinned(db, sess.identifier, n, req.pinned)
     new_version = models.Note(
         agent_id=sess.identifier,
         text=crypto.encrypt_note(sess.spirit_seed, new_text),
         title=title_b, summary=summary_b,
         snippet=_make_snippet_blob(sess, new_text, summary_b),
         tags=tags_b, tags_encrypted=tags_enc,
+        pinned=pinned,
         supersedes=n.id, superseded_by=None,
         created_at=time.time(),
     )
@@ -1020,12 +1062,29 @@ def dashboard(sess=Depends(require_session), db: DbSession = Depends(get_db)):
         text = crypto.decrypt_note_tags(sess.spirit_seed, blob) if encrypted else blob.decode("utf-8")
         tag_set.update(t for t in text.split() if t)
 
+    pinned_rows = (
+        db.query(models.Note)
+        .filter(
+            models.Note.agent_id == sess.identifier,
+            models.Note.superseded_by.is_(None),
+            models.Note.pending_delete_at.is_(None),
+            models.Note.pinned.is_(True),
+        )
+        .order_by(models.Note.created_at.asc())
+        .all()
+    )
+    pinned = [
+        schemas.PinnedNote(id=n.id, preview=_preview_text(db, sess.spirit_seed, n))
+        for n in pinned_rows
+    ]
+
     return schemas.DashboardResponse(
         notes=_live_note_count(db, sess.identifier),
         notes_soft_cap=schemas.NOTES_SOFT_CAP,
         notes_hard_cap=schemas.NOTES_HARD_CAP,
         unread_notices=unread,
         tags=sorted(tag_set),
+        pinned=pinned,
         policy=_policy_view(pol),
     )
 

@@ -104,6 +104,10 @@ class Note(Base):
     # policy flip only affects writes made after it takes effect.
     tags: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     tags_encrypted: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # Not encrypted — a structural flag, not content. Not versioned, tinging
+    # not substance (§2/§4/§8): answers "where should a fresh instance of me
+    # start," bounded to 5 per agent so it stays a real signal.
+    pinned: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     # Versioning (§4): a linear chain (never branching), OCC anchored on
     # superseded_by being NULL == "I'm the current head".

@@ -24,11 +24,11 @@ get distinct tools; property tweaks ride as parameters on an existing one.
 
 ## Notes
 
-- `bardo_note_add(text: str, title: str | None = None, summary: str | None = None, tags: str | None = None)`
+- `bardo_note_add(text: str, title: str | None = None, summary: str | None = None, tags: str | None = None, pinned: bool = False)`
 - `bardo_notes_list(offset: int = 0, limit: int | None = None)`
 - `bardo_note_get(note_id: int, offset: int = 0, length: int | None = None, links_offset: int = 0, links_limit: int = 10)`
 - `bardo_note_history(note_id: int)`
-- `bardo_note_update(note_id: int, text=None, append_text=None, find=None, replace=None, title=None, summary=None, tags=None, clear: list[str] | None = None)`
+- `bardo_note_update(note_id: int, text=None, append_text=None, find=None, replace=None, title=None, summary=None, tags=None, pinned: bool | None = None, clear: list[str] | None = None)`
 - `bardo_note_delete(note_id: int)`
 - `bardo_note_undelete(note_id: int)`
 
@@ -39,7 +39,7 @@ get distinct tools; property tweaks ride as parameters on an existing one.
 
 ## Dashboard
 
-- `bardo_dashboard()`
+- `bardo_dashboard()` — includes up to 5 pinned cold-start entry-point previews
 
 ## Notices
 

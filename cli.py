@@ -19,6 +19,7 @@ Usage:
     python cli.py note update --id N --append "more text"
     python cli.py note update --id N --find "old" --replace "new"
     python cli.py note update --id N --title "..." --clear summary,tags
+    python cli.py note update --id N --pin      # or --unpin
     python cli.py note del --id N
     python cli.py note undelete --id N
     python cli.py note history --id N
@@ -144,9 +145,12 @@ def cmd_note(args):
                 body["summary"] = args.summary
             if args.tags:
                 body["tags"] = args.tags
+            if args.pinned:
+                body["pinned"] = True
             d = _check(c.post("/notes", json=body, headers=_auth()))
             label = f'  title: "{d["title"]}"' if d.get("title") else ""
-            print(f"note #{d['id']} added{label}")
+            pin = "  [pinned]" if d.get("pinned") else ""
+            print(f"note #{d['id']} added{label}{pin}")
 
         elif args.action == "list":
             params = {}
@@ -159,7 +163,8 @@ def cmd_note(args):
             for n in d["notes"]:
                 label = n["title"] or n["snippet"]
                 tags = f"  [{n['tags']}]" if n.get("tags") else ""
-                print(f"  #{n['id']}: {label}{tags}")
+                pin = "  [pinned]" if n.get("pinned") else ""
+                print(f"  #{n['id']}: {label}{tags}{pin}")
 
         elif args.action == "get":
             if args.id is None:
@@ -174,6 +179,8 @@ def cmd_note(args):
                 print(f"summary : {d['summary']}")
             if d.get("tags"):
                 print(f"tags    : {d['tags']}")
+            if d.get("pinned"):
+                print("pinned  : yes")
             print(f"text ({d['offset']}..{d['offset'] + d['length_returned']} of {d['total_length']}):")
             print(d["text"])
             if d["links"]:
@@ -203,6 +210,10 @@ def cmd_note(args):
                 body["summary"] = args.summary
             if args.tags is not None:
                 body["tags"] = args.tags
+            if args.pin:
+                body["pinned"] = True
+            elif args.unpin:
+                body["pinned"] = False
             if args.clear:
                 body["clear"] = args.clear.split(",")
             r = c.patch(f"/notes/{args.id}", json=body, headers=_auth())
@@ -249,6 +260,12 @@ def cmd_dashboard(_):
     print(f"notes   : {d['notes']} (soft cap {d['notes_soft_cap']}, hard cap {d['notes_hard_cap']})")
     print(f"notices : {d['unread_notices']} unread")
     print(f"tags    : {', '.join(d['tags']) if d['tags'] else '(none)'}")
+    if d["pinned"]:
+        print("pinned  : start here —")
+        for p in d["pinned"]:
+            print(f"  #{p['id']}: {p['preview']}")
+    else:
+        print("pinned  : (none — nothing marked as an entry point yet)")
     pol = d["policy"]
     print(f"policy  : export={pol['export_mode']}  tags_encrypted={pol['tags_encrypted']}  "
           f"delete_grace={pol['delete_grace_seconds']}s")
@@ -338,6 +355,9 @@ def main():
     s.add_argument("--offset", type=int, default=0)
     s.add_argument("--length", type=int)
     s.add_argument("--limit", type=int)
+    s.add_argument("--pinned", action="store_true", help="mark as a cold-start entry point (add)")
+    s.add_argument("--pin", action="store_true", help="mark as an entry point (update)")
+    s.add_argument("--unpin", action="store_true", help="unmark as an entry point (update)")
     s.set_defaults(fn=cmd_note)
 
     s = sub.add_parser("link")

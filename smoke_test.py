@@ -399,6 +399,60 @@ check("dashboard reports the soft/hard caps", r.json()["notes_soft_cap"] == 400 
 check("dashboard surfaces tags used so far", "security" in r.json()["tags"] and "todo" in r.json()["tags"])
 check("dashboard includes policy", r.json()["policy"]["tags_encrypted"] is True)
 
+print("\n== api: notes — pinned entry points, the cold-start fix (§2/§7/§8) ==")
+pin_id = client.post("/notes", json={
+    "text": "start here", "title": "read me first", "pinned": True,
+}, headers=nauth).json()["id"]
+r = client.get("/dashboard", headers=nauth)
+check("pinned note appears on the dashboard", any(p["id"] == pin_id for p in r.json()["pinned"]))
+pinned_entry = next(p for p in r.json()["pinned"] if p["id"] == pin_id)
+check("pinned preview uses the title", pinned_entry["preview"] == "read me first")
+
+untitled_pin_id = client.post("/notes", json={
+    "text": "pin without a title, short enough to be its own snippet", "pinned": True,
+}, headers=nauth).json()["id"]
+r = client.get("/dashboard", headers=nauth)
+untitled_entry = next(p for p in r.json()["pinned"] if p["id"] == untitled_pin_id)
+check(
+    "untitled pinned note falls back to its snippet",
+    untitled_entry["preview"] == "pin without a title, short enough to be its own snippet",
+)
+
+toggle_id = client.post("/notes", json={"text": "toggle me"}, headers=nauth).json()["id"]
+r = client.patch(f"/notes/{toggle_id}", json={"pinned": True}, headers=nauth)
+check("pin via metadata-only update", r.json()["pinned"] is True)
+check("pinning doesn't create a new version", r.json()["id"] == toggle_id)
+r = client.patch(f"/notes/{toggle_id}", json={"pinned": False}, headers=nauth)
+check("unpin via metadata-only update", r.json()["pinned"] is False)
+
+carry_id = client.post("/notes", json={"text": "v0", "pinned": True}, headers=nauth).json()["id"]
+carry_id2 = client.patch(f"/notes/{carry_id}", json={"text": "v1"}, headers=nauth).json()["id"]
+check(
+    "pinned survives a text edit (new version, same tinging)",
+    client.get(f"/notes/{carry_id2}", headers=nauth).json()["pinned"] is True,
+)
+
+client.delete(f"/notes/{carry_id2}", headers=nauth)
+r = client.get("/dashboard", headers=nauth)
+check(
+    "a deleted pinned note disappears from the dashboard",
+    not any(p["id"] == carry_id2 for p in r.json()["pinned"]),
+)
+
+# cap enforcement — fresh agent so the count starts from zero
+_, _, pintok = fresh_agent()
+pinauth = {"Authorization": f"Bearer {pintok}"}
+pin_ids = [
+    client.post("/notes", json={"text": f"pin {i}", "pinned": True}, headers=pinauth).json()["id"]
+    for i in range(5)
+]
+r = client.post("/notes", json={"text": "one too many", "pinned": True}, headers=pinauth)
+check("6th pin rejected — cap is 5", r.status_code == 400)
+r = client.patch(f"/notes/{pin_ids[0]}", json={"pinned": False}, headers=pinauth)
+check("unpinning one frees a slot", r.status_code == 200)
+r = client.post("/notes", json={"text": "now there's room", "pinned": True}, headers=pinauth)
+check("pinning again after freeing a slot succeeds", r.status_code == 200)
+
 print("\n== api: notes — hard cap rejects new notes past the limit (§7/§8) ==")
 from atrium.api import schemas as _schemas
 _, _, captok2 = fresh_agent()  # fresh agent so the tiny test cap starts from zero

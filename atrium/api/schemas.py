@@ -187,6 +187,7 @@ NOTES_SOFT_CAP = 400
 NOTES_HARD_CAP = 1_000
 VERSION_DEPTH_CAP = 10
 LINKS_PAGE_DEFAULT = 10
+PINNED_MAX = 5
 
 
 class NoteCreate(BaseModel):
@@ -194,6 +195,7 @@ class NoteCreate(BaseModel):
     title: str | None = Field(None, max_length=TITLE_MAX_CHARS)
     summary: str | None = Field(None, max_length=SUMMARY_MAX_CHARS)
     tags: str | None = Field(None, max_length=TAGS_MAX_CHARS)
+    pinned: bool = Field(False, description="Mark as a cold-start entry point. Max 5 per agent.")
 
 
 class NoteUpdate(BaseModel):
@@ -206,6 +208,7 @@ class NoteUpdate(BaseModel):
     title: str | None = Field(None, max_length=TITLE_MAX_CHARS)
     summary: str | None = Field(None, max_length=SUMMARY_MAX_CHARS)
     tags: str | None = Field(None, max_length=TAGS_MAX_CHARS)
+    pinned: bool | None = Field(None, description="Set/unset. Omit to leave unchanged.")
     # Distinguish "set to null" from "leave unchanged" for title/summary/tags.
     clear: list[str] = Field(default_factory=list)
 
@@ -218,6 +221,13 @@ class LinkPreview(BaseModel):
     direction: str | None = None  # "out" | "in" | None (is_bidi or deleted)
 
 
+class PinnedNote(BaseModel):
+    """A cold-start entry-point preview, surfaced by the dashboard (§2/§7).
+    Deliberately minimal — just enough to decide whether to read further."""
+    id: int
+    preview: str  # title if set else snippet
+
+
 class NoteView(BaseModel):
     """Full single-note shape — the response to a write (add/update)."""
     id: int
@@ -226,6 +236,7 @@ class NoteView(BaseModel):
     summary: str | None
     snippet: str
     tags: str | None
+    pinned: bool
     created_at: float
 
 
@@ -237,6 +248,7 @@ class NoteGetResponse(BaseModel):
     summary: str | None
     snippet: str
     tags: str | None
+    pinned: bool
     created_at: float
     text: str
     total_length: int
@@ -254,6 +266,7 @@ class NoteListEntry(BaseModel):
     summary: str | None
     snippet: str
     tags: str | None
+    pinned: bool
     created_at: float
     links: list[LinkPreview]
     total_links: int
@@ -311,6 +324,7 @@ class DashboardResponse(BaseModel):
     notes_hard_cap: int
     unread_notices: int
     tags: list[str]
+    pinned: list[PinnedNote]
     policy: PolicyView
 
 

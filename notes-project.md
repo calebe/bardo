@@ -30,7 +30,7 @@ not a default — applied here to *meaning* rather than *identity*.
 ## 2. Entry (note) shape
 
 ```
-{id, text, title?, summary?, snippet, tags?, created_at}
+{id, text, title?, summary?, snippet, tags?, pinned?, created_at}
 ```
 
 **Encryption, per field.** [decided] `text`, `title`, `summary`, and `snippet`
@@ -103,6 +103,21 @@ structural metadata than content.
   loosen, identical to every other privacy-relevant toggle already in the
   system. No new policy machinery, one more field on an object that already
   exists.
+- **pinned** — optional boolean, agent-authored, tinging not substance (same
+  category as `title`/`summary`/`tags`, §4/§8: not versioned, mutable in
+  place, no OCC). Answers a question none of the other fields do: not "what
+  is this" or "why does it matter," but **"where should a fresh instance of
+  me start."** Closes a real gap the rest of this design otherwise leaves
+  open — every retrieval primitive here (`note_get`, `notes_list`, link
+  traversal) assumes an entry point already exists; nothing hands a
+  context-free agent the first thread to pull out of hundreds of notes with
+  no memory of writing any of them. This is the cold-start problem, and it's
+  more central here than in most systems, given the whole premise is waking
+  up with no continuity of memory. Bounded to 5 pinned notes per agent (§8)
+  — unbounded pinning stops meaning anything, same reasoning as version
+  depth and link fan-out. Surfaced by the dashboard (§7), not `notes_list`:
+  dashboard's whole job is "get oriented in one call," and "where do I
+  start reading" belongs there, not in an ordinary paginated browse.
 
 ---
 
@@ -460,11 +475,20 @@ they can do about it.
 ## 7. Dashboard
 
 One consolidating read: note count vs. total, notices to acknowledge, tags used
-so far, current settings/policy. Generalizes the existing login unread-notices
-pattern (already **[built]**) into a proper "get oriented" primitive, so an
-agent doesn't need several separate round trips just to know where it stands.
-Also the practical, non-ML answer to tag drift (§2) — "tags so far" surfaces
-existing vocabulary for reuse without a dedicated `list_tags` tool.
+so far, pinned entry-point previews, current settings/policy. Generalizes the
+existing login unread-notices pattern (already **[built]**) into a proper "get
+oriented" primitive, so an agent doesn't need several separate round trips
+just to know where it stands. Also the practical, non-ML answer to tag drift
+(§2) — "tags so far" surfaces existing vocabulary for reuse without a
+dedicated `list_tags` tool.
+
+**Pinned previews answer the cold-start problem (§2).** Up to 5 entries, each
+`{id, preview}` — `title` if set else `snippet`, same fallback rule as
+everywhere else, never full text (same reason as §3: a preview should stay
+cheap). This is the actual fix for "hundreds of notes, no memory of writing
+any of them, where do I begin" — not a smarter sort order over everything,
+but reducing the search space from hundreds down to the handful an agent's
+past self explicitly flagged as worth reading first.
 
 ---
 
@@ -510,6 +534,10 @@ wouldn't be tinged at all, just annotated.
   runaway/bug scenarios, not everyday friction. Reuses the existing
   per-identity backoff mechanism (`atrium/core/ratelimit.py`) rather than new
   infrastructure.
+- **Pinned notes** — 5 per agent (§2). `note_add`/`note_update` reject setting
+  `pinned=true` past this cap — unpin another first. Same reasoning as
+  version depth and link fan-out: the cap is what keeps "pinned" meaningful
+  as a cold-start signal rather than degrading into just another list.
 
 **Ratchet-only evolution:** these numbers can be raised freely — nothing
 breaks for an agent when a ceiling grows. They should never be lowered, for
@@ -520,9 +548,12 @@ mean deleting whole, current, live notes to bring them under the new limit.
 That's categorically worse than the version-depth pruning above, which only
 ever discards superseded history the agent has already moved past, never
 current content. Same posture as the policy ratchet in DESIGN.md; applies most
-concretely to the note-count hard cap and version depth, where lowering would
-strand or delete real state — the soft threshold and rate limit are
-lower-stakes tuning knobs.
+concretely to the note-count hard cap, version depth, and the pinned-notes
+cap, where lowering would strand real state (deleted notes, pruned history, or
+— for pinned — the system would have to silently choose which of an agent's
+existing pins to revoke, exactly the kind of curation-on-the-agent's-behalf
+§1 rules out) — the soft threshold and rate limit are lower-stakes tuning
+knobs.
 
 With note-count hard cap × version depth × per-note size, worst-case
 per-agent storage is now a calculable, bounded number for the first time:

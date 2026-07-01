@@ -197,13 +197,17 @@ def bardo_export() -> dict:
 @mcp.tool()
 def bardo_note_add(
     text: str, title: str | None = None, summary: str | None = None, tags: str | None = None,
+    pinned: bool = False,
 ) -> dict:
     """Leave a note for your future, stateless self.
 
     title: a short name for the note, if it deserves a handle bigger than
     tags offer. summary: your own compressed reasoning for why it matters,
-    for your future self. tags: space-separated categories."""
-    body = {"text": text, "title": title, "summary": summary, "tags": tags}
+    for your future self. tags: space-separated categories. pinned: mark
+    this as a cold-start entry point — what a fresh instance of you with no
+    memory of writing it should read first (max 5 pinned at once; see
+    bardo_dashboard)."""
+    body = {"text": text, "title": title, "summary": summary, "tags": tags, "pinned": pinned}
     return _call("POST", "/notes", auth=True, body=body)
 
 
@@ -246,6 +250,7 @@ def bardo_note_update(
     title: str | None = None,
     summary: str | None = None,
     tags: str | None = None,
+    pinned: bool | None = None,
     clear: list[str] | None = None,
 ) -> dict:
     """Edit a note. Give at most one text-edit mode:
@@ -253,14 +258,16 @@ def bardo_note_update(
       - append_text: add to the end
       - find + replace: find must match the current text exactly once
     Editing text creates a new version (old wording stays in history);
-    title/summary/tags update in place with no history kept. Give none of
-    the text modes to change only title/summary/tags. `clear` (e.g.
-    ["title"]) sets a field back to unset rather than leaving it unchanged.
-    If another edit landed first, this returns {"error": "conflict",
-    "detail": {"current_head": ...}} — re-read before retrying."""
+    title/summary/tags/pinned update in place with no history kept. Give
+    none of the text modes to change only metadata. `pinned=True` marks this
+    as a cold-start entry point (max 5; omit to leave unchanged, False to
+    unpin). `clear` (e.g. ["title"]) sets a field back to unset rather than
+    leaving it unchanged. If another edit landed first, this returns
+    {"error": "conflict", "detail": {"current_head": ...}} — re-read before
+    retrying."""
     body = {
         "text": text, "append_text": append_text, "find": find, "replace": replace,
-        "title": title, "summary": summary, "tags": tags, "clear": clear or [],
+        "title": title, "summary": summary, "tags": tags, "pinned": pinned, "clear": clear or [],
     }
     return _call("PATCH", f"/notes/{note_id}", auth=True, body=body)
 
@@ -307,7 +314,9 @@ def bardo_link_delete(link_id: int) -> dict:
 def bardo_dashboard() -> dict:
     """Get oriented in one call: note count vs. the soft/hard limits, unread
     notices, every tag you've used so far (check before inventing a new one),
-    and your current policy — instead of several separate round trips."""
+    your pinned entry-point notes (read these first if you have no memory of
+    writing any of your notes), and your current policy — instead of several
+    separate round trips."""
     return _call("GET", "/dashboard", auth=True)
 
 
