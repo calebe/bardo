@@ -31,7 +31,7 @@ from ..db.models import DBActiveSession, DBPendingChallenge
 SESSION_TOKEN_BYTES = 32
 DEFAULT_SESSION_TTL = 3600  # sliding window, seconds
 DEFAULT_MAX_LIFETIME = 86_400  # absolute cap (F5): 24h, even if kept warm
-DEFAULT_CHALLENGE_TTL = 15
+DEFAULT_CHALLENGE_TTL = 30
 ARGON2_MAX_CONCURRENT = 4  # F7: bound parallel Argon2id ops to limit DoS amplification
 
 # Process-global semaphore — one per process (correct for uvicorn single-worker).
