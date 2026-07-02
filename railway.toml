@@ -2,8 +2,8 @@
 builder = "dockerfile"
 
 [deploy]
-preDeployCommand = "alembic upgrade head"
-startCommand = "sh -c 'whoami; id; ls -la /data; (touch /data/.write_test && echo DATA_WRITABLE) || echo DATA_NOT_WRITABLE; uvicorn atrium.main:app --host 0.0.0.0 --port $PORT --workers 1'"
+preDeployCommand = "sh -c 'chown -R bardo:bardo /data && su bardo -s /bin/sh -c \"alembic upgrade head\"'"
+startCommand = "sh -c 'chown -R bardo:bardo /data && exec su bardo -s /bin/sh -c \"uvicorn atrium.main:app --host 0.0.0.0 --port $PORT --workers 1\"'"
 healthcheckPath = "/"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"

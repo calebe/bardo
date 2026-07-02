@@ -21,17 +21,16 @@ COPY migrations/ migrations/
 COPY atrium/ atrium/
 
 # /data is where the SQLite volume is mounted in production.
-# Creating it here ensures the directory exists even without a volume.
+# Creating it here ensures the directory exists (and is bardo-writable) even
+# without a volume attached. A *mounted* volume, though, arrives owned by
+# root regardless of this -- the mount replaces this layer's directory
+# entirely -- so ownership is fixed up again at container start below.
 RUN mkdir -p /data && chown bardo:bardo /data
-
-USER bardo
 
 EXPOSE 8000
 
-# Run migrations then start the server. Migrations are idempotent — if the
-# schema is already current, alembic upgrade head is a no-op.
-CMD alembic upgrade head && \
-    uvicorn atrium.main:app \
-        --host 0.0.0.0 \
-        --port 8000 \
-        --workers 1
+# Stay root here so the chown below can actually reach a mounted volume;
+# drop to the unprivileged `bardo` user for the app itself via su. Migrations
+# are idempotent -- if the schema is already current, upgrade head is a no-op.
+CMD chown -R bardo:bardo /data && \
+    su bardo -s /bin/sh -c "alembic upgrade head && exec uvicorn atrium.main:app --host 0.0.0.0 --port 8000 --workers 1"
