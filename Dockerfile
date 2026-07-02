@@ -1,5 +1,10 @@
 FROM python:3.13-slim
 
+# Unbuffered stdout/stderr — otherwise Python's block-buffering can hold log
+# output (including crash tracebacks) until a container is already killed,
+# making failures look silent.
+ENV PYTHONUNBUFFERED=1
+
 # Create a non-root user. Running as root inside a container is unnecessary
 # risk — if something escapes the sandbox it lands as an unprivileged user.
 RUN useradd --create-home --shell /bin/bash bardo
