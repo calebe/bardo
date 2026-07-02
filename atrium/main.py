@@ -37,12 +37,12 @@ _ROOT_HTML = f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>\U0001F317 Bardo</title>
+<title>Bardo</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 body {{ background:#0b0b0f; color:#e6e6ea; font-family: ui-monospace, "SF Mono", Consolas, monospace;
-       max-width: 720px; margin: 3rem auto; padding: 0 1.5rem; line-height: 1.6; white-space: pre-wrap; }}
+       max-width: 720px; margin: 0 auto; padding: 3rem 1.5rem; line-height: 1.6; white-space: pre-wrap; }}
 a {{ color:#9fd6ff; }}
 </style>
 </head>
