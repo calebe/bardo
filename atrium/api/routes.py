@@ -17,6 +17,7 @@ Endpoint groups:
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 
@@ -34,6 +35,7 @@ from ..db.database import get_db, SessionLocal
 from . import schemas
 
 router = APIRouter()
+_log = logging.getLogger("bardo")
 
 # Session store: metadata in DB, spirit seeds in process memory only.
 store = SessionStore(SessionLocal)
@@ -829,17 +831,23 @@ def notes_list(
 
     entries = []
     for n in q.all():
-        links, total_links = _note_links_page(db, sess.spirit_seed, n.id, 0, schemas.LINKS_PAGE_DEFAULT)
-        entries.append(schemas.NoteListEntry(
-            id=n.id,
-            title=crypto.decrypt_note_title(sess.spirit_seed, n.title) if n.title else None,
-            summary=crypto.decrypt_note_summary(sess.spirit_seed, n.summary) if n.summary else None,
-            snippet=_ensure_snippet(db, sess.spirit_seed, n),
-            tags=_decode_tags(sess.spirit_seed, n.tags, n.tags_encrypted),
-            pinned=n.pinned,
-            created_at=n.created_at,
-            links=links, total_links=total_links,
-        ))
+        try:
+            links, total_links = _note_links_page(db, sess.spirit_seed, n.id, 0, schemas.LINKS_PAGE_DEFAULT)
+            entries.append(schemas.NoteListEntry(
+                id=n.id,
+                title=crypto.decrypt_note_title(sess.spirit_seed, n.title) if n.title else None,
+                summary=crypto.decrypt_note_summary(sess.spirit_seed, n.summary) if n.summary else None,
+                snippet=_ensure_snippet(db, sess.spirit_seed, n),
+                tags=_decode_tags(sess.spirit_seed, n.tags, n.tags_encrypted),
+                pinned=n.pinned,
+                created_at=n.created_at,
+                links=links, total_links=total_links,
+            ))
+        except ValueError:
+            # A single undecryptable row (corrupt data, foreign-key orphan,
+            # etc.) must not take down the whole list — every other note
+            # stays reachable. Surfaced in total_notes vs. len(notes) skew.
+            _log.warning("note %s (agent %s) failed to decrypt — skipped in list", n.id, sess.identifier)
     return schemas.NotesListResponse(notes=entries, total_notes=total, offset=offset, limit_applied=limit)
 
 
@@ -854,23 +862,27 @@ def note_get(
     db: DbSession = Depends(get_db),
 ):
     n = _owned_note_visible(db, sess, note_id)
-    full_text = crypto.decrypt_note(sess.spirit_seed, n.text)
-    total_length = len(full_text)
-    end = total_length if length is None else min(total_length, offset + max(0, length))
-    sliced = full_text[offset:end]
-    links, total_links = _note_links_page(db, sess.spirit_seed, n.id, links_offset, links_limit)
+    try:
+        full_text = crypto.decrypt_note(sess.spirit_seed, n.text)
+        total_length = len(full_text)
+        end = total_length if length is None else min(total_length, offset + max(0, length))
+        sliced = full_text[offset:end]
+        links, total_links = _note_links_page(db, sess.spirit_seed, n.id, links_offset, links_limit)
 
-    return schemas.NoteGetResponse(
-        id=n.id,
-        title=crypto.decrypt_note_title(sess.spirit_seed, n.title) if n.title else None,
-        summary=crypto.decrypt_note_summary(sess.spirit_seed, n.summary) if n.summary else None,
-        snippet=_ensure_snippet(db, sess.spirit_seed, n),
-        tags=_decode_tags(sess.spirit_seed, n.tags, n.tags_encrypted),
-        pinned=n.pinned,
-        created_at=n.created_at,
-        text=sliced, total_length=total_length, offset=offset, length_returned=len(sliced),
-        links=links, total_links=total_links, links_offset=links_offset,
-    )
+        return schemas.NoteGetResponse(
+            id=n.id,
+            title=crypto.decrypt_note_title(sess.spirit_seed, n.title) if n.title else None,
+            summary=crypto.decrypt_note_summary(sess.spirit_seed, n.summary) if n.summary else None,
+            snippet=_ensure_snippet(db, sess.spirit_seed, n),
+            tags=_decode_tags(sess.spirit_seed, n.tags, n.tags_encrypted),
+            pinned=n.pinned,
+            created_at=n.created_at,
+            text=sliced, total_length=total_length, offset=offset, length_returned=len(sliced),
+            links=links, total_links=total_links, links_offset=links_offset,
+        )
+    except ValueError:
+        _log.warning("note %s (agent %s) failed to decrypt on note_get", n.id, sess.identifier)
+        raise HTTPException(500, "note data could not be decrypted — it may be corrupted")
 
 
 @router.get("/notes/{note_id}/history", response_model=schemas.NoteHistoryResponse)
