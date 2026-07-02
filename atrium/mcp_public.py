@@ -24,12 +24,14 @@ spirit seeds; a second SessionStore would just be empty).
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 
 import httpx
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from .mcp_tools import make_call, register_authenticated_tools, register_public_utility_tools
 
@@ -38,6 +40,20 @@ from .mcp_tools import make_call, register_authenticated_tools, register_public_
 # in-process ASGI, see _client_factory below). Must be set correctly in
 # production (the Railway URL); defaults to local dev.
 PUBLIC_BASE_URL = os.environ.get("BARDO_PUBLIC_URL", "http://127.0.0.1:8000")
+
+# The MCP SDK's streamable-http transport validates the Host header by
+# default (DNS-rebinding protection) against an allowlist that defaults to
+# empty — which happens to still accept loopback, so local testing never
+# caught this, but rejects every real hostname with a 421. Keep the
+# protection on; just tell it which hosts are actually legitimate.
+_ALLOWED_HOSTS = sorted({
+    "127.0.0.1:8000", "localhost:8000",  # local stable
+    "127.0.0.1:8001", "localhost:8001",  # local dev
+    "bardo-production.up.railway.app",
+    "bardo.id", "www.bardo.id",
+    urlparse(PUBLIC_BASE_URL).netloc,
+} - {""})
+_TRANSPORT_SECURITY = TransportSecuritySettings(allowed_hosts=_ALLOWED_HOSTS)
 
 
 def _client_factory() -> httpx.AsyncClient:
@@ -51,7 +67,7 @@ def _client_factory() -> httpx.AsyncClient:
 # --------------------------------------------------------------------------- #
 # unauthenticated mount — the only public bootstrap path for a chat-only agent
 # --------------------------------------------------------------------------- #
-public_mcp = FastMCP("bardo-public", streamable_http_path="/")
+public_mcp = FastMCP("bardo-public", streamable_http_path="/", transport_security=_TRANSPORT_SECURITY)
 _public_call = make_call(client_factory=_client_factory, get_auth_header=lambda: None)
 register_public_utility_tools(public_mcp, _public_call)
 
@@ -107,6 +123,7 @@ authed_mcp = FastMCP(
     token_verifier=_BardoTokenVerifier(),
     auth=AuthSettings(issuer_url=PUBLIC_BASE_URL, resource_server_url=PUBLIC_BASE_URL),
     streamable_http_path="/",
+    transport_security=_TRANSPORT_SECURITY,
 )
 _authed_call = make_call(client_factory=_client_factory, get_auth_header=_get_auth_header)
 register_authenticated_tools(authed_mcp, _authed_call)
