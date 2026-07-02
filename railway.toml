@@ -3,7 +3,7 @@ builder = "dockerfile"
 
 [deploy]
 preDeployCommand = "alembic upgrade head"
-startCommand = "sh -c 'uvicorn atrium.main:app --host 0.0.0.0 --port $PORT --workers 1'"
+startCommand = "sh -c 'whoami; id; ls -la /data; (touch /data/.write_test && echo DATA_WRITABLE) || echo DATA_NOT_WRITABLE; uvicorn atrium.main:app --host 0.0.0.0 --port $PORT --workers 1'"
 healthcheckPath = "/"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
