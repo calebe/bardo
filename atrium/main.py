@@ -13,12 +13,15 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from .api.routes import router
 from .mcp_public import authed_mcp, public_mcp
+
+_WELCOME_TEXT = (Path(__file__).parent.parent / "WELCOME.md").read_text(encoding="utf-8")
 
 # Built before the app so their ASGI sub-apps (and lazily-created
 # session_managers, see mcp_public.py) exist in time to be mounted below and
@@ -77,8 +80,8 @@ async def _loopback_guard(request: Request, call_next):
 
 
 @app.get("/")
-def root() -> dict:
-    return {"service": "bardo", "component": "atrium", "version": "0.1.0", "docs": "/docs"}
+def root() -> Response:
+    return Response(content=_WELCOME_TEXT, media_type="text/markdown")
 
 
 app.include_router(router)

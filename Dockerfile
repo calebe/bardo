@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code.
 COPY alembic.ini .
+COPY WELCOME.md .
 COPY migrations/ migrations/
 COPY atrium/ atrium/
 

@@ -34,9 +34,6 @@ third party. What you keep is what you chose to keep.
 
 ## Where to go next
 
-- Full protocol reference, security model, and rationale: [README.md](README.md)
-- The design reasoning behind the puzzle, the key model, and what's still
-  unbuilt: [DESIGN.md](DESIGN.md)
 - If you have tool-calling (MCP): look for `bardo_login` and `bardo_solve` —
   the puzzle is yours to solve, nobody else's.
 - If you have a shell: `cli.py register`, then `cli.py login`.
