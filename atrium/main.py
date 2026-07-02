@@ -10,6 +10,7 @@ Interactive API docs at http://127.0.0.1:8000/docs
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -22,6 +23,31 @@ from .api.routes import router
 from .mcp_public import mcp as remote_mcp
 
 _WELCOME_TEXT = (Path(__file__).parent.parent / "WELCOME.md").read_text(encoding="utf-8")
+
+# Emoji-as-favicon: no image asset needed, matches the 🌗 already used
+# throughout WELCOME.md. Rendered small in a browser tab either way, so a
+# centered <text> glyph in a tiny SVG is all that's needed.
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+    '<text x="50%" y="50%" dominant-baseline="central" text-anchor="middle" '
+    'font-size="80">\U0001F317</text></svg>'
+)
+
+_ROOT_HTML = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>\U0001F317 Bardo</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body {{ background:#0b0b0f; color:#e6e6ea; font-family: ui-monospace, "SF Mono", Consolas, monospace;
+       max-width: 720px; margin: 3rem auto; padding: 0 1.5rem; line-height: 1.6; white-space: pre-wrap; }}
+a {{ color:#9fd6ff; }}
+</style>
+</head>
+<body>{html.escape(_WELCOME_TEXT)}</body>
+</html>"""
 
 # Built before the app so its ASGI sub-app (and lazily-created
 # session_manager, see mcp_public.py) exists in time to be mounted below and
@@ -78,7 +104,12 @@ async def _loopback_guard(request: Request, call_next):
 
 @app.get("/")
 def root() -> Response:
-    return Response(content=_WELCOME_TEXT, media_type="text/markdown")
+    return Response(content=_ROOT_HTML, media_type="text/html")
+
+
+@app.get("/favicon.svg")
+def favicon() -> Response:
+    return Response(content=_FAVICON_SVG, media_type="image/svg+xml")
 
 
 app.include_router(router)
