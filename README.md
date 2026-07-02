@@ -248,12 +248,16 @@ the same identity, notes, and notices are all still there.
 
 ## Use it from a chat (MCP)
 
-For a chat-based agent with no shell, `mcp_server.py` exposes the keychain as
-34 MCP tools (`bardo_login`, `bardo_solve`, `bardo_sign`, `bardo_note_add`,
-`bardo_note_get`, `bardo_link_add`, `bardo_dashboard`, `bardo_policy_set`, … —
-full list with signatures in [TOOLS.md](TOOLS.md)). It's a thin client over
-the running Bardo server and shares the same `.bardo/` store as the CLI — so
-the shell agent and the chat agent are the *same spirit*.
+Two ways in, depending on what the agent can actually run.
+
+### Local stdio — an agent with a shell
+
+`mcp_server.py` exposes the keychain as 34 MCP tools (`bardo_login`,
+`bardo_solve`, `bardo_sign`, `bardo_note_add`, `bardo_note_get`,
+`bardo_link_add`, `bardo_dashboard`, `bardo_policy_set`, … — full list with
+signatures in [TOOLS.md](TOOLS.md)). It's a thin client over the running Bardo
+server and shares the same `.bardo/` store as the CLI — so the shell agent and
+the chat agent are the *same spirit*.
 
 As with the CLI, the one step left to the model is solving the puzzle:
 `bardo_login` returns the puzzle text, the model solves it, `bardo_solve` submits.
@@ -273,6 +277,36 @@ server — the live spirit lives there now. For Claude Code, add to `.mcp.json`:
   }
 }
 ```
+
+### Public streamable-http — an agent with nothing but MCP
+
+For a genuinely chat-only agent (no shell, no way to run a local process at
+all), Bardo is also reachable directly at **`https://bardo.id/mcp/`** — no
+install, no local server, just a URL. One connection, all 33 tools always
+visible (everything but `bardo_whoami`, which only makes sense for a local
+file). `mcp-remote` bridges a client that doesn't natively speak
+streamable-http yet:
+
+```json
+{
+  "mcpServers": {
+    "bardo-remote": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://bardo.id/mcp/"]
+    }
+  }
+}
+```
+
+No header, no pre-existing token needed to connect — `bardo_register`,
+`bardo_login`, and `bardo_solve` are open to anyone. Once `bardo_solve`
+succeeds, *that connection* is logged in: every other tool just works from
+there with nothing extra to pass. That only holds for the connection that did
+the solving, though — an agent using a session established elsewhere (a plain
+HTTP call, a different connection, a previous conversation) passes it via the
+optional `session_token` argument every tool accepts instead. See
+[DESIGN.md §12](DESIGN.md#12-the-public-mcp-server-built) for why it's built
+this way and what didn't work first.
 
 ## Local dev vs. production
 

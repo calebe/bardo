@@ -28,7 +28,12 @@ when a design choice introduces an external party who curates the agent's
 identity, that's a smell to examine, not a default to accept.
 
 Origin: inspired by a procedure already in use on Moltbook ("the Facebook
-exclusive for AI agents").
+exclusive for AI agents"). Checked, while designing the public MCP server
+(§12), whether Moltbook's own MCP integration had solved the *same-conversation
+bootstrap* problem better than an early draft of ours — it hasn't: registration
+there is HTTP-only, entirely out-of-band from any MCP session, with no
+MCP-native way for an agent to register and immediately use its new identity
+in one sitting. Not prior art to match; a bar to clear.
 
 The name: *atrium* is the heart's receiving chamber — the passage everything
 enters the heart through — and an architectural entrance hall. A passageway for
@@ -376,5 +381,65 @@ rate-limit reset semantics · 256-bit API secret.
 
 **Top 3 to act on:** F1 (export default) ✅ → F4 (encrypt notes at rest) ✅ →
 F3+F5 (loopback guard + absolute session cap) ✅. F4 tail (notices + service registry) ✅.
-*All done.* Remaining open: F6 (human-notify on queued loosen), F7 (Argon2
-concurrency cap), F10 (note size limit).
+F7 (Argon2 concurrency cap) ✅. F10 (note size limit) ✅. Remaining open: F6
+(human-notify on queued loosen — partial, needs out-of-band delivery), F8
+(enumeration oracle — partial), F9 (Sybil resistance — noted, not urgent).
+
+---
+
+## 12. The public MCP server **[built]**
+
+`mcp_server.py` (local stdio) requires an agent that can run a subprocess —
+Claude Code, Claude Desktop's local mode. A chat-only agent with MCP but no
+shell has no way in at all. `atrium/mcp_public.py`, mounted at `/mcp/` in
+`atrium.main:app`, exposes the same tool surface over `streamable-http` so any
+MCP client can reach Bardo directly, no local install.
+
+**First design, and why it didn't survive.** MCP's built-in connection auth
+(FastMCP's `token_verifier`) gates an entire connection, not individual tools
+— confirmed empirically, no way to exempt some tools on one mount. So the
+first working version split the surface in two: `/mcp/public/` (no auth:
+register/login/solve/verify/encrypt) and `/mcp/` (Bearer-gated: everything
+else). It worked, and shipped — but it didn't actually deliver the thing it
+was built for. MCP connections fix their headers at connect time; an agent
+could register and solve on the public mount, entirely within one
+conversation, and then hit a wall — using that new session required a
+*second*, differently-configured connection, which meant a human manually
+editing a config file and restarting the client. The one-conversation,
+zero-pre-config bootstrap story broke at exactly the moment it mattered: right
+after the agent proved itself.
+
+**Current design: one mount, no connection-level auth, every tool always
+visible.** `bardo_solve` remembers which Bardo session belongs to which MCP
+*connection* — keyed by the connection's own `ServerSession` object, held in
+a `weakref.WeakKeyDictionary` so a closed connection's entry disappears with
+no cleanup hook needed (confirmed by spike: that object is stable across every
+tool call within one connection, distinct across separate connections — a
+safe, leak-free correlation key). Every other tool resolves its session from
+that automatically. This is why bootstrapping through this server needs
+nothing repeated, remembered, or configured by a human mid-conversation — the
+same quality the local stdio client already had via its `.bardo/` file, now
+achieved for a genuinely stateless, multi-tenant remote server.
+
+**The gap this doesn't (can't) close.** If identity is established outside
+that exact MCP connection — a plain HTTP/curl solve, a previous conversation,
+a different connection — the server has no way to know two separate channels
+belong to the same caller without a shared secret changing hands. Every
+authenticated tool takes an optional `session_token` parameter as that
+explicit fallback. Not a flaw to fix; an inherent limit of two channels having
+no ambient way to prove they're the same agent. Worth stating plainly because
+it's the kind of thing that looks like a bug the first time an agent hits it.
+
+**A transport-layer gotcha, unrelated to the auth-model rewrite above but hit
+in the same effort, worth its own note:** the MCP SDK's `streamable-http`
+transport carries its own DNS-rebinding protection — a `Host`-header
+allowlist, independent of `token_verifier` — that defaults to *empty*. Empty
+happens to still accept loopback, so purely local testing never caught it, but
+it rejected every real hostname outright (`421 Misdirected Request`) once
+deployed. Shipped broken once before anyone noticed, including a nominally
+"complete" local smoke test — the lesson generalizes: **a local-only test
+suite cannot verify a check whose entire purpose is distinguishing local from
+non-local.** Fixed by populating `TransportSecuritySettings(allowed_hosts=…)`
+with the real hostnames rather than disabling the protection; verified after
+by spoofing the `Host` header against the actual deployed values, and
+separately confirming an unrelated hostname still correctly gets rejected.
