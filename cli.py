@@ -27,6 +27,13 @@ Usage:
     python cli.py link del --id N
     python cli.py dashboard
     python cli.py export
+    python cli.py services
+    python cli.py session list
+    python cli.py session revoke [--all]
+    python cli.py policy get
+    python cli.py policy set --export-mode allow            # prints a step-up puzzle
+    python cli.py policy solve "<answer>"                   # then submits the queued fields
+    python cli.py policy abort
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ BASE = os.environ.get("BARDO_URL", "http://127.0.0.1:8000")
 HOME = Path(os.environ.get("BARDO_HOME", ".bardo"))
 CREDS, SESSION, PENDING = HOME / "credentials.json", HOME / "session.json", HOME / "pending.json"
 PENDING_CONTACT = HOME / "pending_contact.json"
+PENDING_POLICY = HOME / "pending_policy.json"
 
 
 def _save(path: Path, obj) -> None:
@@ -133,6 +141,39 @@ def cmd_derive(args):
     print(f"derived identity for {d['service']}")
     print("  signing pubkey    :", d["signing_public_key_b64"])
     print("  encryption pubkey :", d["encryption_public_key_b64"])
+
+
+def cmd_services(_):
+    with _client() as c:
+        rows = _check(c.get("/ops/services", headers=_auth()))
+    if not rows:
+        print("(no derived services yet — use:  python cli.py derive <service>)")
+    for s in rows:
+        flag = "  [revoked]" if s["revoked"] else ""
+        print(f"  {s['service']}{flag}")
+        print(f"    signing pubkey    : {s['signing_public_key_b64']}")
+        print(f"    encryption pubkey : {s['encryption_public_key_b64']}")
+
+
+def cmd_session(args):
+    with _client() as c:
+        if args.action == "list":
+            rows = _check(c.get("/sessions", headers=_auth()))
+            if not rows:
+                print("(no active sessions)")
+            for s in rows:
+                print(f"  {s['token'][:12]}…  created {s['created_at']}  "
+                      f"last used {s['last_used_at']}  expires {s['expires_at']}")
+
+        elif args.action == "revoke":
+            if args.all:
+                d = _check(c.delete("/sessions", headers=_auth()))
+                print(f"revoked {d['revoked']} session(s)")
+            else:
+                _check(c.delete("/sessions/current", headers=_auth()))
+                print("current session revoked")
+            SESSION.unlink(missing_ok=True)
+            print("log in again to continue:  python cli.py login")
 
 
 def cmd_note(args):
@@ -314,6 +355,56 @@ def cmd_contact(args):
                 print("contact endpoint removed")
 
 
+def cmd_policy(args):
+    with _client() as c:
+        if args.action == "get":
+            d = _check(c.get("/policy", headers=_auth()))
+            pol = d["active"]
+            print(f"export_mode          : {pol['export_mode']}")
+            print(f"max_session_ttl      : {pol['max_session_ttl']}")
+            print(f"service_allowlist    : {pol['service_allowlist']}")
+            print(f"loosen_delay_seconds : {pol['loosen_delay_seconds']}")
+            print(f"tags_encrypted       : {pol['tags_encrypted']}")
+            print(f"delete_grace_seconds : {pol['delete_grace_seconds']}")
+            if d.get("pending"):
+                p = d["pending"]
+                print(f"\npending change effective in ~{int(p['seconds_remaining'])}s: {p['policy']}")
+            else:
+                print("\nno pending change")
+
+        elif args.action == "set":
+            fields: dict = {}
+            for fld in ("export_mode", "max_session_ttl", "loosen_delay_seconds", "delete_grace_seconds"):
+                val = getattr(args, fld)
+                if val is not None:
+                    fields[fld] = val
+            if args.tags_encrypted is not None:
+                fields["tags_encrypted"] = args.tags_encrypted == "true"
+            if args.service_allowlist is not None:
+                fields["service_allowlist"] = args.service_allowlist.split(",") if args.service_allowlist else []
+            if args.clear:
+                fields["clear"] = args.clear.split(",")
+            if not fields:
+                _die("usage: bardo policy set --export-mode X | --max-session-ttl N | ... (at least one field)")
+            d = _check(c.post("/auth/stepup", headers=_auth()))
+            _save(PENDING_POLICY, {"challenge_id": d["challenge_id"], "fields": fields})
+            print(f"STEP-UP PUZZLE  (ttl {d['ttl_seconds']}s) — solve it, then:  python cli.py policy solve \"<answer>\"\n")
+            print(d["puzzle"])
+
+        elif args.action == "abort":
+            d = _check(c.delete("/policy/pending", headers=_auth()))
+            print("pending change aborted" if d["aborted"] else "no pending change to abort")
+
+        elif args.action == "solve":
+            if not args.text:
+                _die('usage: bardo policy solve "<answer>"')
+            pend = _load(PENDING_POLICY) or _die("no pending policy step-up — run:  python cli.py policy set ...")
+            body = {"challenge_id": pend["challenge_id"], "answer": args.text, "clear": [], **pend["fields"]}
+            d = _check(c.post("/policy", json=body, headers=_auth()))
+            PENDING_POLICY.unlink(missing_ok=True)
+            print(f"policy change: {d['applied']}")
+
+
 def cmd_notices(args):
     with _client() as c:
         if args.ack:
@@ -340,6 +431,12 @@ def main():
     s = sub.add_parser("sign"); s.add_argument("message"); s.set_defaults(fn=cmd_sign)
     sub.add_parser("export").set_defaults(fn=cmd_export)
     s = sub.add_parser("derive"); s.add_argument("service"); s.set_defaults(fn=cmd_derive)
+    sub.add_parser("services").set_defaults(fn=cmd_services)
+
+    s = sub.add_parser("session")
+    s.add_argument("action", choices=["list", "revoke"])
+    s.add_argument("--all", action="store_true", help="revoke every session, not just the current one")
+    s.set_defaults(fn=cmd_session)
 
     s = sub.add_parser("note")
     s.add_argument("action", choices=["add", "list", "get", "update", "del", "undelete", "history"])
@@ -377,6 +474,19 @@ def main():
     s.add_argument("action", choices=["get", "set", "del", "solve"])
     s.add_argument("text", nargs="?", default="")
     s.set_defaults(fn=cmd_contact)
+
+    s = sub.add_parser("policy")
+    s.add_argument("action", choices=["get", "set", "abort", "solve"])
+    s.add_argument("text", nargs="?", default="", help="answer, for solve")
+    s.add_argument("--export-mode", dest="export_mode", choices=["allow", "require_repuzzle", "disabled"])
+    s.add_argument("--max-session-ttl", dest="max_session_ttl", type=int)
+    s.add_argument("--service-allowlist", dest="service_allowlist",
+                    help="comma-separated services; pass \"\" for an empty (block-all) list")
+    s.add_argument("--loosen-delay-seconds", dest="loosen_delay_seconds", type=int)
+    s.add_argument("--tags-encrypted", dest="tags_encrypted", choices=["true", "false"])
+    s.add_argument("--delete-grace-seconds", dest="delete_grace_seconds", type=int)
+    s.add_argument("--clear", help="comma-separated fields to null out: max_session_ttl,service_allowlist")
+    s.set_defaults(fn=cmd_policy)
 
     args = p.parse_args()
     args.fn(args)

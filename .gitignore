@@ -16,6 +16,7 @@ __pycache__/
 # Local credentials and session state — real per-agent secrets, never committed.
 .bardo/
 .bardo-dev/
+.bardo-local-retired/
 
 # Editor/OS cruft
 .DS_Store

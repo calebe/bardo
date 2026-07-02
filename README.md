@@ -233,6 +233,13 @@ because that's the point: a real LLM, in the loop.
 .\.venv\Scripts\python.exe cli.py contact set "agent@example.com"  # step-up puzzle
 .\.venv\Scripts\python.exe cli.py contact solve "<answer>"
 .\.venv\Scripts\python.exe cli.py export            # reveal the raw spirit key
+.\.venv\Scripts\python.exe cli.py services           # list derived service identities
+.\.venv\Scripts\python.exe cli.py session list
+.\.venv\Scripts\python.exe cli.py session revoke [--all]
+.\.venv\Scripts\python.exe cli.py policy get
+.\.venv\Scripts\python.exe cli.py policy set --export-mode allow   # step-up puzzle
+.\.venv\Scripts\python.exe cli.py policy solve "<answer>"
+.\.venv\Scripts\python.exe cli.py policy abort       # abort a queued loosening
 ```
 
 The session is the ephemeral *body*; the API key in `.bardo/credentials.json`
@@ -242,17 +249,18 @@ the same identity, notes, and notices are all still there.
 ## Use it from a chat (MCP)
 
 For a chat-based agent with no shell, `mcp_server.py` exposes the keychain as
-26 MCP tools (`bardo_login`, `bardo_solve`, `bardo_sign`, `bardo_note_add`,
-`bardo_note_get`, `bardo_link_add`, `bardo_dashboard`, … — full list with
-signatures in [TOOLS.md](TOOLS.md)). It's a thin client over the running Bardo
-server and shares the same `.bardo/` store as the CLI — so the shell agent and
-the chat agent are the *same spirit*.
+34 MCP tools (`bardo_login`, `bardo_solve`, `bardo_sign`, `bardo_note_add`,
+`bardo_note_get`, `bardo_link_add`, `bardo_dashboard`, `bardo_policy_set`, … —
+full list with signatures in [TOOLS.md](TOOLS.md)). It's a thin client over
+the running Bardo server and shares the same `.bardo/` store as the CLI — so
+the shell agent and the chat agent are the *same spirit*.
 
 As with the CLI, the one step left to the model is solving the puzzle:
 `bardo_login` returns the puzzle text, the model solves it, `bardo_solve` submits.
 
-Register it with your MCP client (Bardo server must be running). For Claude Code,
-add to `.mcp.json`:
+Register it with your MCP client. Since 2026-07-02 the reference deployment
+(Claude Desktop's `bardo` entry) points `BARDO_URL` at production, not a local
+server — the live spirit lives there now. For Claude Code, add to `.mcp.json`:
 
 ```json
 {
@@ -260,19 +268,27 @@ add to `.mcp.json`:
     "bardo": {
       "command": "C:\\Users\\caleb\\Claude\\Code\\atrium\\.venv\\Scripts\\python.exe",
       "args": ["C:\\Users\\caleb\\Claude\\Code\\atrium\\mcp_server.py"],
-      "env": { "BARDO_URL": "http://127.0.0.1:8000" }
+      "env": { "BARDO_URL": "https://bardo-production.up.railway.app" }
     }
   }
 }
 ```
 
-## Dev / stable split
+## Local dev vs. production
 
-Two instances, so building the platform never disturbs the live keychain agents
-use. Isolation is three-fold — separate port, DB, and credential home:
+**As of 2026-07-02, production is the live spirit** — the local `:8000`
+"stable" instance has been retired (its logon autostart removed; `atrium.db`
+and its old identity still exist on disk but are no longer treated as
+canonical). `.bardo/` — the CLI/MCP's default credential home — now holds an
+identity registered directly against production, and Claude Desktop's `bardo`
+MCP entry points `BARDO_URL` at `https://bardo-production.up.railway.app`.
+
+`run_stable.ps1` is kept for exactly one purpose: an ad-hoc full-fidelity
+local run if you ever need one — it is not autostarted and nothing points at
+it by default anymore. `run_dev.ps1` is unaffected and still the way to build
+and test:
 
 ```powershell
-.\run_stable.ps1   # :8000 · atrium.db      · home .bardo     — the live spirit
 .\run_dev.ps1      # :8001 · atrium-dev.db  · home .bardo-dev — throwaway, hot reload
 ```
 
@@ -282,8 +298,9 @@ Point the CLI / MCP at dev with:
 $env:BARDO_URL = "http://127.0.0.1:8001"; $env:BARDO_HOME = ".bardo-dev"
 ```
 
-Build and test against `:8001`; promote to `:8000` only when ready. The stable
-spirit is never touched by development.
+Build and test against `:8001`; push to `main` to ship — Railway redeploys
+production automatically (see Deploy, below). Production is never touched by
+local development.
 
 ## Deploy
 

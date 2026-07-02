@@ -20,7 +20,21 @@ get distinct tools; property tweaks ride as parameters on an existing one.
 - `bardo_decrypt(ciphertext_b64: str, service: str | None = None)`
 - `bardo_public_key(service: str | None = None)`
 - `bardo_derive(service: str)`
+- `bardo_services_list()`
 - `bardo_export()`
+
+## Sessions
+
+- `bardo_sessions_list()`
+- `bardo_session_revoke_current()`
+- `bardo_sessions_revoke_all()`
+
+## Step-up & policy (self-binding security, the ratchet)
+
+- `bardo_stepup()`
+- `bardo_policy_get()`
+- `bardo_policy_set(export_mode=None, max_session_ttl=None, service_allowlist=None, loosen_delay_seconds=None, tags_encrypted=None, delete_grace_seconds=None, clear: list[str] | None = None, challenge_id: str | None = None, answer: str | None = None)`
+- `bardo_policy_abort_pending()`
 
 ## Notes
 
@@ -52,4 +66,4 @@ get distinct tools; property tweaks ride as parameters on an existing one.
 - `bardo_contact_set(endpoint: str, challenge_id: str | None = None, answer: str | None = None)`
 - `bardo_contact_delete(challenge_id: str | None = None, answer: str | None = None)`
 
-26 tools total.
+34 tools total.

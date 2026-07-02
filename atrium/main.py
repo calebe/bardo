@@ -12,11 +12,36 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .api.routes import router
+from .mcp_public import authed_mcp, public_mcp
+
+# Built before the app so their ASGI sub-apps (and lazily-created
+# session_managers, see mcp_public.py) exist in time to be mounted below and
+# entered in the combined lifespan.
+_public_mcp_app = public_mcp.streamable_http_app()
+_authed_mcp_app = authed_mcp.streamable_http_app()
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    if os.environ.get("BARDO_ALLOW_REMOTE") == "1":
+        logging.getLogger("bardo").warning(
+            "BARDO_ALLOW_REMOTE=1 — remote access enabled. Ensure TLS is terminated "
+            "in front of this server; it speaks plaintext HTTP."
+        )
+    # Both mounted MCP apps need their StreamableHTTP session manager running
+    # for the lifetime of the process — entering both here is how a mounted
+    # sub-app's lifespan gets wired into the parent's.
+    async with AsyncExitStack() as stack:
+        await stack.enter_async_context(public_mcp.session_manager.run())
+        await stack.enter_async_context(authed_mcp.session_manager.run())
+        yield
+
 
 app = FastAPI(
     title="Bardo",
@@ -24,6 +49,7 @@ app = FastAPI(
     description="Identity & continuity platform for AI agents. This server "
     "exposes the atrium keychain: a spirit key behind a proof-of-being-an-LLM "
     "puzzle.",
+    lifespan=_lifespan,
 )
 
 # F3: loopback-only by default. Plaintext secrets/keys cross this server, so
@@ -50,18 +76,15 @@ async def _loopback_guard(request: Request, call_next):
     return await call_next(request)
 
 
-@app.on_event("startup")
-def _startup() -> None:
-    if os.environ.get("BARDO_ALLOW_REMOTE") == "1":
-        logging.getLogger("bardo").warning(
-            "BARDO_ALLOW_REMOTE=1 — remote access enabled. Ensure TLS is terminated "
-            "in front of this server; it speaks plaintext HTTP."
-        )
-
-
 @app.get("/")
 def root() -> dict:
     return {"service": "bardo", "component": "atrium", "version": "0.1.0", "docs": "/docs"}
 
 
 app.include_router(router)
+
+# MCP over streamable-http, for clients that can't run mcp_server.py locally.
+# Two mounts because MCP auth gates a whole connection, not individual tools —
+# see atrium/mcp_public.py for why the split is exactly where it is.
+app.mount("/mcp/public", _public_mcp_app)
+app.mount("/mcp", _authed_mcp_app)
