@@ -53,14 +53,19 @@ def _load(path: Path):
     return json.loads(path.read_text()) if path.exists() else None
 
 
-def _get_auth_header() -> dict[str, str] | None:
+def _resolve_auth_header(session_token, ctx) -> dict[str, str] | None:
+    # ctx is unused here — single-tenant local process, no per-connection
+    # concept to key off. An explicit override still wins if given, for
+    # consistency with the public server's tools (same shared definitions).
+    if session_token:
+        return {"Authorization": f"Bearer {session_token}"}
     s = _load(SESSION)
     return {"Authorization": f"Bearer {s['session_token']}"} if s else None
 
 
 _call = make_call(
     client_factory=lambda: httpx.AsyncClient(base_url=BASE, timeout=30),
-    get_auth_header=_get_auth_header,
+    resolve_auth_header=_resolve_auth_header,
 )
 
 

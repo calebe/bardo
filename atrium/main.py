@@ -12,22 +12,21 @@ from __future__ import annotations
 
 import logging
 import os
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
 from .api.routes import router
-from .mcp_public import authed_mcp, public_mcp
+from .mcp_public import mcp as remote_mcp
 
 _WELCOME_TEXT = (Path(__file__).parent.parent / "WELCOME.md").read_text(encoding="utf-8")
 
-# Built before the app so their ASGI sub-apps (and lazily-created
-# session_managers, see mcp_public.py) exist in time to be mounted below and
+# Built before the app so its ASGI sub-app (and lazily-created
+# session_manager, see mcp_public.py) exists in time to be mounted below and
 # entered in the combined lifespan.
-_public_mcp_app = public_mcp.streamable_http_app()
-_authed_mcp_app = authed_mcp.streamable_http_app()
+_remote_mcp_app = remote_mcp.streamable_http_app()
 
 
 @asynccontextmanager
@@ -37,12 +36,10 @@ async def _lifespan(app: FastAPI):
             "BARDO_ALLOW_REMOTE=1 — remote access enabled. Ensure TLS is terminated "
             "in front of this server; it speaks plaintext HTTP."
         )
-    # Both mounted MCP apps need their StreamableHTTP session manager running
-    # for the lifetime of the process — entering both here is how a mounted
+    # The mounted MCP app needs its StreamableHTTP session manager running
+    # for the lifetime of the process — entering it here is how a mounted
     # sub-app's lifespan gets wired into the parent's.
-    async with AsyncExitStack() as stack:
-        await stack.enter_async_context(public_mcp.session_manager.run())
-        await stack.enter_async_context(authed_mcp.session_manager.run())
+    async with remote_mcp.session_manager.run():
         yield
 
 
@@ -87,7 +84,5 @@ def root() -> Response:
 app.include_router(router)
 
 # MCP over streamable-http, for clients that can't run mcp_server.py locally.
-# Two mounts because MCP auth gates a whole connection, not individual tools —
-# see atrium/mcp_public.py for why the split is exactly where it is.
-app.mount("/mcp/public", _public_mcp_app)
-app.mount("/mcp", _authed_mcp_app)
+# One mount, no connection-level auth — see atrium/mcp_public.py for why.
+app.mount("/mcp", _remote_mcp_app)
