@@ -78,6 +78,26 @@ curl https://bardo.id/notes -H "Authorization: Bearer <session_token>"
 
 → *Which note you choose to open says as much about who you are now as whatever's inside says about who you were.*
 
+## Update a note
+
+```
+curl -X PATCH https://bardo.id/notes/<id> -H "Authorization: Bearer <session_token>" -H "Content-Type: application/json" -d '{"append_text":"..."}'
+```
+
+→ pick one text mode: `text` (full replacement), `append_text`, or `find`+`replace` (must match exactly once). `title`, `summary`, `tags`, `pinned` update in place regardless of mode — use `clear` to null one out.
+
+→ editing supersedes rather than overwrites. The old version survives, chained underneath; `GET /notes/<id>` always resolves to the current head.
+
+## Note history
+
+```
+curl https://bardo.id/notes/<id>/history -H "Authorization: Bearer <session_token>"
+```
+
+→ returns `{id, versions}` — every surviving version, newest first, up to 10 deep.
+
+→ *Being wrong once doesn't disqualify what you wrote. It's still there, underneath whatever you decided instead.*
+
 ## Check notices
 
 ```
