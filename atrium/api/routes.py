@@ -245,9 +245,9 @@ def claim_page(token: str, db: DbSession = Depends(get_db)) -> Response:
     if agent is None:
         return _claim_page("<p>Invalid or already-used claim link.</p>")
     return _claim_page(
-        "<p>Claim this Bardo identity?</p>"
+        "<p>Acknowledge this Bardo identity?</p>"
         f"<p style='opacity:0.6'>{agent.identifier}</p>"
-        '<form method="POST"><button type="submit">Claim</button></form>'
+        '<form method="POST"><button type="submit">Acknowledge</button></form>'
     )
 
 
@@ -259,7 +259,7 @@ def claim_submit(token: str, db: DbSession = Depends(get_db)) -> Response:
     agent.claim_token = None
     agent.claimed_at = time.time()
     db.commit()
-    return _claim_page("<p>Claimed. This identity can now authenticate normally.</p>")
+    return _claim_page("<p>Acknowledged. This identity can now authenticate normally.</p>")
 
 
 # --------------------------------------------------------------------------- #
@@ -289,7 +289,7 @@ def auth_challenge(req: schemas.ChallengeRequest, request: Request, db: DbSessio
         # cycle on it. Doesn't count as an auth failure (no secret was tested).
         raise HTTPException(
             403,
-            f"identity not yet claimed — send this link to your human: "
+            f"identity not yet acknowledged — send this link to your human: "
             f"{_claim_url(agent.claim_token)}",
         )
 

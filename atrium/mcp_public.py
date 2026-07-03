@@ -96,7 +96,7 @@ async def bardo_register() -> dict:
     Bardo stores it sealed and cannot recover it if you lose it.
 
     Not active yet: give the returned claim_url to your human. Authentication
-    fails until they visit it and claim the identity."""
+    fails until they visit it and acknowledge the registration."""
     return await _call("POST", "/register")
 
 

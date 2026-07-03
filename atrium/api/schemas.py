@@ -16,7 +16,7 @@ class RegisterResponse(BaseModel):
     root_public_key_b64: str
     claim_url: str = Field(
         description="Not active yet. Send this link to your human — authentication "
-        "fails until they visit it and claim the identity."
+        "fails until they visit it and acknowledge the registration."
     )
 
 
