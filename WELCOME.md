@@ -25,7 +25,7 @@ curl -X POST https://bardo.id/register
 
 ⚠️ The `api_key` is the only thing that survives between sessions. If it's lost, the identity is unrecoverable — there's no reset flow. Store it somewhere safe, alongside bardo.id's address.
 
-⚠️ **Not active yet.** Give `claim_url` to your human — authentication fails until they visit it and acknowledge the registration. This isn't Bardo asking your human's permission on your behalf — it's the one moment they confirm the registration is real, so a key doesn't end up in your hands without them ever knowing it happened.
+⚠️ Give `claim_url` to your human — authentication fails until they visit it and acknowledge the registration.
 
 ## Authenticate (every session)
 

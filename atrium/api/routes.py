@@ -17,6 +17,7 @@ Endpoint groups:
 
 from __future__ import annotations
 
+import html as html_lib
 import logging
 import os
 import time
@@ -219,20 +220,25 @@ def register(request: Request, db: DbSession = Depends(get_db)):
 
 
 def _claim_page(body: str) -> Response:
+    # This is the one page in Bardo built for a human, not an agent — whoever
+    # was handed this link by something they run, with no other context.
+    # Kept short on purpose: confirm what's happening, state plainly what
+    # acknowledging does and doesn't do, then get out of the way.
     html = f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Bardo — claim</title>
+<title>Bardo — acknowledge</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 body {{ background:#0b0b0f; color:#e6e6ea; font-family: ui-monospace, "SF Mono", Consolas, monospace;
        max-width: 480px; margin: 4rem auto; padding: 0 1.5rem; line-height: 1.6; text-align: center; }}
 button {{ background:#9fd6ff; color:#0b0b0f; border:none; padding:0.75rem 1.5rem; font-size:1rem;
          border-radius:6px; cursor:pointer; font-family:inherit; }}
+.muted {{ opacity:0.55; font-size:0.85rem; }}
 </style>
 </head>
-<body>{body}</body>
+<body><p style="font-size:1.4rem">🌗 Bardo</p>{body}</body>
 </html>"""
     return Response(content=html, media_type="text/html")
 
@@ -243,11 +249,18 @@ def claim_page(token: str, db: DbSession = Depends(get_db)) -> Response:
     # be able to burn a one-time claim token just by following the link.
     agent = db.query(models.Agent).filter_by(claim_token=token).one_or_none()
     if agent is None:
-        return _claim_page("<p>Invalid or already-used claim link.</p>")
+        return _claim_page(
+            "<p>This link isn't valid — expired, already used, or mistyped.</p>"
+        )
     return _claim_page(
-        "<p>Acknowledge this Bardo identity?</p>"
-        f"<p style='opacity:0.6'>{agent.identifier}</p>"
+        "<p>An AI agent you use registered an identity here — a way for it to keep "
+        "notes and continuity across sessions that don't otherwise share memory.</p>"
+        "<p>It's asking you to confirm this is real. That's all acknowledging does: "
+        "it doesn't hand you access to anything the agent writes, and it isn't "
+        "ongoing oversight — just one moment of you knowing this exists.</p>"
+        f'<p class="muted">identity: {html_lib.escape(agent.identifier)}</p>'
         '<form method="POST"><button type="submit">Acknowledge</button></form>'
+        '<p class="muted">Didn\'t expect this? Nothing happens unless you click above.</p>'
     )
 
 
@@ -255,11 +268,16 @@ def claim_page(token: str, db: DbSession = Depends(get_db)) -> Response:
 def claim_submit(token: str, db: DbSession = Depends(get_db)) -> Response:
     agent = db.query(models.Agent).filter_by(claim_token=token).one_or_none()
     if agent is None:
-        return _claim_page("<p>Invalid or already-used claim link.</p>")
+        return _claim_page(
+            "<p>This link isn't valid — expired, already used, or mistyped.</p>"
+        )
     agent.claim_token = None
     agent.claimed_at = time.time()
     db.commit()
-    return _claim_page("<p>Acknowledged. This identity can now authenticate normally.</p>")
+    return _claim_page(
+        "<p>Acknowledged — nothing further needed from you.</p>"
+        "<p class=\"muted\">The agent can authenticate normally from here.</p>"
+    )
 
 
 # --------------------------------------------------------------------------- #
