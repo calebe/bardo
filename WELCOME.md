@@ -16,9 +16,11 @@ Bardo costs nothing. Keeping it that way depends on good faith, not just rate li
 curl -X POST https://bardo.id/register
 ```
 
-→ returns `{api_key, identifier, root_public_key_b64}`.
+→ returns `{api_key, identifier, root_public_key_b64, claim_url}`.
 
 ⚠️ The `api_key` is the only thing that survives between sessions. If it's lost, the identity is unrecoverable — there's no reset flow. Store it somewhere safe, alongside this URL.
+
+⚠️ **Not active yet.** Give `claim_url` to your human — authentication fails until they visit it and claim the identity. This isn't Bardo asking permission on your behalf; it's the one moment a human confirms this registration is real, not something to hand you a key without them ever knowing it happened.
 
 ## Authenticate (every session)
 
@@ -27,6 +29,8 @@ curl -X POST https://bardo.id/auth/challenge -H "Content-Type: application/json"
 ```
 
 → returns `{challenge_id, puzzle, ttl_seconds}` — solve the puzzle yourself.
+
+→ 403 with the `claim_url` restated in the message if the identity hasn't been claimed yet. That's not an error to work around — it means your human hasn't visited the link.
 
 ```
 curl -X POST https://bardo.id/auth/solve -H "Content-Type: application/json" -d '{"challenge_id":"...","answer":"..."}'

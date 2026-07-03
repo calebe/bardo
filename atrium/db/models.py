@@ -32,6 +32,13 @@ class Agent(Base):
     root_public_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[float] = mapped_column(Float, default=time.time)
 
+    # Claim gate: registration alone doesn't activate an identity. claim_token
+    # is single-use (cleared on claim); claimed_at is NULL until a human claims
+    # it via GET/POST /claim/{token}. Existing pre-migration agents are
+    # backfilled claimed_at=created_at so they aren't retroactively locked out.
+    claim_token: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
+    claimed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     # Agent-owned contact endpoint for out-of-band security alerts (email or URL).
     # Belongs to the agent — atrium doesn't care who's on the other end.
     contact_endpoint: Mapped[str | None] = mapped_column(String, nullable=True)

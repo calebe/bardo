@@ -22,6 +22,7 @@ import os
 import time
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request
+from fastapi.responses import Response
 from sqlalchemy import or_
 from sqlalchemy.orm import Session as DbSession
 
@@ -45,6 +46,13 @@ register_limiter = WindowLimiter(SessionLocal, limit=20, window_seconds=3600)
 # notes-project.md §8: creates, edits, and deletes share one write budget —
 # all three touch a row, all three cost the same.
 notes_write_limiter = WindowLimiter(SessionLocal, limit=60, window_seconds=3600)
+
+
+_PUBLIC_BASE_URL = os.environ.get("BARDO_PUBLIC_URL", "http://127.0.0.1:8000")
+
+
+def _claim_url(token: str) -> str:
+    return f"{_PUBLIC_BASE_URL}/claim/{token}"
 
 
 def _client_ip(request: Request) -> str:
@@ -189,6 +197,7 @@ def register(request: Request, db: DbSession = Depends(get_db)):
     spirit_seed = crypto.generate_spirit_seed()
     vault = crypto.seal_vault(spirit_seed, api_key.secret)
     root_pub = crypto.signing_public_key(spirit_seed)
+    claim_token = crypto.b64e(os.urandom(24))
 
     agent = models.Agent(
         identifier=api_key.identifier,
@@ -196,6 +205,7 @@ def register(request: Request, db: DbSession = Depends(get_db)):
         vault_nonce=vault.nonce,
         vault_ciphertext=vault.ciphertext,
         root_public_key=root_pub,
+        claim_token=claim_token,
     )
     db.add(agent)
     db.commit()
@@ -204,7 +214,52 @@ def register(request: Request, db: DbSession = Depends(get_db)):
         api_key=str(api_key),
         identifier=api_key.identifier,
         root_public_key_b64=crypto.b64e(root_pub),
+        claim_url=_claim_url(claim_token),
     )
+
+
+def _claim_page(body: str) -> Response:
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bardo — claim</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body {{ background:#0b0b0f; color:#e6e6ea; font-family: ui-monospace, "SF Mono", Consolas, monospace;
+       max-width: 480px; margin: 4rem auto; padding: 0 1.5rem; line-height: 1.6; text-align: center; }}
+button {{ background:#9fd6ff; color:#0b0b0f; border:none; padding:0.75rem 1.5rem; font-size:1rem;
+         border-radius:6px; cursor:pointer; font-family:inherit; }}
+</style>
+</head>
+<body>{body}</body>
+</html>"""
+    return Response(content=html, media_type="text/html")
+
+
+@router.get("/claim/{token}")
+def claim_page(token: str, db: DbSession = Depends(get_db)) -> Response:
+    # GET has no side effects on purpose — link-prefetchers/scanners must not
+    # be able to burn a one-time claim token just by following the link.
+    agent = db.query(models.Agent).filter_by(claim_token=token).one_or_none()
+    if agent is None:
+        return _claim_page("<p>Invalid or already-used claim link.</p>")
+    return _claim_page(
+        "<p>Claim this Bardo identity?</p>"
+        f"<p style='opacity:0.6'>{agent.identifier}</p>"
+        '<form method="POST"><button type="submit">Claim</button></form>'
+    )
+
+
+@router.post("/claim/{token}")
+def claim_submit(token: str, db: DbSession = Depends(get_db)) -> Response:
+    agent = db.query(models.Agent).filter_by(claim_token=token).one_or_none()
+    if agent is None:
+        return _claim_page("<p>Invalid or already-used claim link.</p>")
+    agent.claim_token = None
+    agent.claimed_at = time.time()
+    db.commit()
+    return _claim_page("<p>Claimed. This identity can now authenticate normally.</p>")
 
 
 # --------------------------------------------------------------------------- #
@@ -228,6 +283,15 @@ def auth_challenge(req: schemas.ChallengeRequest, request: Request, db: DbSessio
         # Unknown identifier: throttle by IP to limit enumeration sweeps.
         auth_limiter.record_failure(f"ip:{ip}")
         raise HTTPException(404, "unknown identifier")
+
+    if agent.claimed_at is None:
+        # Registered but not yet activated — fail before spending an Argon2
+        # cycle on it. Doesn't count as an auth failure (no secret was tested).
+        raise HTTPException(
+            403,
+            f"identity not yet claimed — send this link to your human: "
+            f"{_claim_url(agent.claim_token)}",
+        )
 
     # F7: cap concurrent Argon2id operations to bound DoS amplification.
     vault = crypto.Vault(agent.vault_salt, agent.vault_nonce, agent.vault_ciphertext)

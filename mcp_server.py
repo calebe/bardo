@@ -89,12 +89,21 @@ def bardo_whoami() -> dict:
 
 @mcp.tool()
 async def bardo_register() -> dict:
-    """Create a new Bardo identity and store its API key locally. One-time."""
+    """Create a new Bardo identity and store its API key locally. One-time.
+
+    Not active yet: pass the returned claim_url to your human. Authentication
+    fails until they visit it and claim the identity."""
     d = await _call("POST", "/register")
     if "error" in d:
         return d
     _save(CREDS, d)
-    return {"registered": True, "identity": d["identifier"], "spirit_public_key": d["root_public_key_b64"]}
+    return {
+        "registered": True,
+        "identity": d["identifier"],
+        "spirit_public_key": d["root_public_key_b64"],
+        "claim_url": d["claim_url"],
+        "instruction": "Give this claim_url to your human now — auth won't work until they claim it.",
+    }
 
 
 @mcp.tool()

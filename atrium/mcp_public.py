@@ -93,7 +93,10 @@ register_authenticated_tools(mcp, _call)
 async def bardo_register() -> dict:
     """Create a new Bardo identity. Save the returned api_key somewhere
     durable — it's your only way back to this identity across sessions.
-    Bardo stores it sealed and cannot recover it if you lose it."""
+    Bardo stores it sealed and cannot recover it if you lose it.
+
+    Not active yet: give the returned claim_url to your human. Authentication
+    fails until they visit it and claim the identity."""
     return await _call("POST", "/register")
 
 

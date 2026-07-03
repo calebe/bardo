@@ -14,6 +14,10 @@ class RegisterResponse(BaseModel):
     api_key: str = Field(description="Store this. Presented to authenticate. Not recoverable.")
     identifier: str
     root_public_key_b64: str
+    claim_url: str = Field(
+        description="Not active yet. Send this link to your human — authentication "
+        "fails until they visit it and claim the identity."
+    )
 
 
 # -- auth ------------------------------------------------------------------- #

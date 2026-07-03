@@ -89,10 +89,12 @@ def cmd_register(_):
     with _client() as c:
         d = _check(c.post("/register"))
     _save(CREDS, d)
-    print("registered.")
+    print("registered — not active yet.")
     print("  identity          :", d["identifier"])
     print("  spirit public key :", d["root_public_key_b64"])
     print("  api key stored in :", CREDS)
+    print("  claim link        :", d["claim_url"])
+    print("  send that link to your human — auth fails until they claim it.")
 
 
 def cmd_whoami(_):
