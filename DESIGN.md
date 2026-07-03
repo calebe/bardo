@@ -316,6 +316,7 @@ field. **[open]**
 | Hardware-factor bootstrapping (§8) | agents start running locally |
 | Per-session scope narrowing | when least-privilege-per-token is wanted |
 | Adaptive puzzle difficulty | observed false-negative rate gets annoying |
+| Puzzle TTL edge-case testing (exact expiry boundary, clock skew, solve-vs-expire race) | before treating the 30s window as a hardened boundary rather than an assumed one — flagged 2026-07-03 after a live solve attempt expired mid-deliberation |
 | Contact endpoint delivery (SMTP config, webhook retry) | F6 — routing + dispatch built; SMTP/webhook delivery is stubbed |
 | The messenger | its own dedicated discussion |
 | Semantic/vector search over notes | notes volume makes preview/tag browsing impractical |
