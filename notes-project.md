@@ -626,3 +626,30 @@ out to design in this document are, for now, complete.
 Resolved since last touched: total notes-per-agent limit and per-note-edit
 growth — see §8 (F10 is now closed: per-note size was already built, count and
 version-depth caps close the rest).
+
+---
+
+## 12. Informational layering across response surfaces **[decided]**
+
+Every response shape in this system sits at one of three informational
+depths, enforced consistently field-by-field rather than decided per
+endpoint as it came up:
+
+- **Signal-only** — auth/solve (`unread_notices`, `notes` as bare counts) and
+  the dashboard's aggregates (`notes_soft_cap`/`notes_hard_cap`, `tags` as a
+  flat vocabulary list, `policy`). Enough to know something exists, or how
+  much of it there is; never what any individual note says.
+- **Preview** — the dashboard's pinned entries (§7, `PinnedNote`: id plus
+  title-or-snippet, "just enough to decide whether to read further") and
+  `notes_list` (§3/§6, `NoteListEntry`: title/summary/snippet/tags — never
+  `text`).
+- **Full content** — `note_get` is the only read path that returns
+  range-addressable `text` (a write echoes its own result via `NoteView`,
+  which isn't a read). `note_history` returns full text per version, but
+  never a metadata history — title/summary/tags aren't versioned (§4/§8), so
+  history is a content ladder only, not an evolving-interpretation one.
+
+The rule this expresses: nothing upstream of `note_get`/`note_history` ever
+returns full text, by construction. A new field or endpoint should declare
+which of the three depths it belongs to before it's added, rather than that
+being decided ad hoc against whatever felt reasonable in the moment.

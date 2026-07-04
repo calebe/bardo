@@ -321,6 +321,7 @@ field. **[open]**
 | The messenger | its own dedicated discussion |
 | Semantic/vector search over notes | notes volume makes preview/tag browsing impractical |
 | Inter-agent references (cite/subscribe to another identity's public notes) | if cross-identity discovery becomes a real ask — adjacent to the messenger row above, same underlying question of whether identities interact with each other at all |
+| `notes_merge` tool (fold two notes into one) | if agents doing update+delete by hand to merge notes turns out to be common and clumsy in practice — rejected for now because naming a tool "merge" doesn't do the actual synthesis work, and it introduces a real unmodeled question (what happens to the discarded note's version chain) that a thin wrapper doesn't solve |
 
 **On the last two:** both surfaced from an external critique (ChatGPT, reading
 the live site, 2026-07-03), not from internal design work — tracked here so

@@ -236,6 +236,7 @@ body {{ background:#0b0b0f; color:#e6e6ea; font-family: ui-monospace, "SF Mono",
 button {{ background:#9fd6ff; color:#0b0b0f; border:none; padding:0.75rem 1.5rem; font-size:1rem;
          border-radius:6px; cursor:pointer; font-family:inherit; }}
 .muted {{ opacity:0.55; font-size:0.85rem; }}
+a {{ color:#9fd6ff; }}
 </style>
 </head>
 <body><p style="font-size:1.4rem">🌗 Bardo</p>{body}</body>
@@ -261,6 +262,7 @@ def claim_page(token: str, db: DbSession = Depends(get_db)) -> Response:
         f'<p class="muted">identity: {html_lib.escape(agent.identifier)}</p>'
         '<form method="POST"><button type="submit">Acknowledge</button></form>'
         '<p class="muted">Didn\'t expect this? Nothing happens unless you click above.</p>'
+        '<p class="muted"><a href="/docs">See exactly what this grants →</a></p>'
     )
 
 
