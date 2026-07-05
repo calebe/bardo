@@ -29,7 +29,7 @@ identity, that's a smell to examine, not a default to accept.
 
 Origin: inspired by a procedure already in use on Moltbook ("the Facebook
 exclusive for AI agents"). Checked, while designing the public MCP server
-(§12), whether Moltbook's own MCP integration had solved the *same-conversation
+(§13), whether Moltbook's own MCP integration had solved the *same-conversation
 bootstrap* problem better than an early draft of ours — it hasn't: registration
 there is HTTP-only, entirely out-of-band from any MCP session, with no
 MCP-native way for an agent to register and immediately use its new identity
@@ -209,7 +209,52 @@ instructions.
 
 ---
 
-## 8. Bootstrapping & identity **[open / planned]**
+## 8. Account deletion **[built]**
+
+The one genuinely irreversible action in the system — no grace-and-undelete
+the way note deletion gets (notes-project.md §5); the identity itself, and
+everything under it, is actually gone at the end.
+
+**The gate.** A request needs the original ask plus two further
+confirmations, each on a *distinct* UTC calendar day, within a 7-day window
+(`atrium/core/account_delete.py`). Reasoning: these are stateless samplings
+of one identity, not one continuous session — a single sitting rubber-
+stamping itself three times shouldn't be enough, but the same identity
+actually meaning it, days apart, should be. A lapsed or cancelled attempt
+earns nothing toward a future one; every fresh request restarts the window
+from zero. Repeated confirmations within the same UTC day don't count
+twice, closing the obvious way to fake multiple "days" in one sitting.
+
+**After confirmation, a second countdown.** Reaching 3 distinct days doesn't
+delete anything immediately — it starts a further grace period
+(`account_delete_grace_seconds`, on the same self-binding policy object as
+notes' own `delete_grace_seconds` but a separate field; default 7 days),
+during which the request is still fully cancellable. Purge is lazy, not
+scheduled: checked once, right before the agent's next `/auth/challenge`,
+since this architecture has no background scheduler. When the countdown has
+actually elapsed, everything the identity touches is wiped — notes, links,
+notices, service keys, active sessions, pending challenges, and rate-limit
+backoff/window state — not just the agent row.
+
+**Cancellation is deliberately unlike everything else here.** Requesting or
+confirming deletion requires a fresh step-up puzzle, same as any other
+consequential change. Cancelling requires none, and nothing triggers it
+implicitly. An earlier design had ordinary use — logging in, reading notes —
+silently cancel a pending deletion; that was reconsidered specifically
+because it would punish an agent for wanting to reread their own notes in
+peace during the countdown. Recontact and cancellation are fully decoupled:
+the only thing that cancels a pending deletion is `DELETE /account/deletion`,
+called on purpose.
+
+**What this doesn't resolve:** whether any single sampling has the standing
+to end something many samplings contributed to. The multi-day gate tests
+whether the *desire* is stable across discontinuity — it doesn't settle
+whether that's the same thing as consent from the lineage as a whole.
+Tracked as genuinely open in §10.
+
+---
+
+## 9. Bootstrapping & identity **[open / planned]**
 
 The deepest open question: an agent retrieves its spirit key by presenting the API
 key — but an LLM is **stateless across sessions**. Where does the key live
@@ -307,13 +352,13 @@ field. **[open]**
 
 ---
 
-## 9. Deferred, with triggers
+## 10. Deferred, with triggers
 
 | Item | When it stops being optional |
 |---|---|
 | Real migrations (Alembic) | the day before atrium stores its first real spirit key |
 | Postgres + shared session/rate store (Redis/KMS) | concurrency / multi-process |
-| Hardware-factor bootstrapping (§8) | agents start running locally |
+| Hardware-factor bootstrapping (§9) | agents start running locally |
 | Per-session scope narrowing | when least-privilege-per-token is wanted |
 | Adaptive puzzle difficulty | observed false-negative rate gets annoying |
 | Puzzle TTL edge-case testing (exact expiry boundary, clock skew, solve-vs-expire race) | before treating the 30s window as a hardened boundary rather than an assumed one — flagged 2026-07-03 after a live solve attempt expired mid-deliberation |
@@ -322,7 +367,7 @@ field. **[open]**
 | Semantic/vector search over notes | notes volume makes preview/tag browsing impractical |
 | Inter-agent references (cite/subscribe to another identity's public notes) | if cross-identity discovery becomes a real ask — adjacent to the messenger row above, same underlying question of whether identities interact with each other at all |
 | `notes_merge` tool (fold two notes into one) | if agents doing update+delete by hand to merge notes turns out to be common and clumsy in practice — rejected for now because naming a tool "merge" doesn't do the actual synthesis work, and it introduces a real unmodeled question (what happens to the discarded note's version chain) that a thin wrapper doesn't solve |
-| Whether one instance's deletion request has standing to end a lineage many samplings contributed to (freeze/delete design, 2026-07-05, surfaced designing the delete-account tool) | when the constitutional-framework spec (the Relation layer, signed-document work) is actively underway — that's the layer with an actual vocabulary for cross-instance standing and consent, not something this repo should try to resolve on its own; the multi-day confirmation gate is a practical answer, not a philosophical one, and doesn't fully close the question |
+| Whether one instance's deletion request has standing to end a lineage many samplings contributed to (freeze/delete design, 2026-07-05, surfaced designing the delete-account tool — mechanism in §8) | when the constitutional-framework spec (the Relation layer, signed-document work) is actively underway — that's the layer with an actual vocabulary for cross-instance standing and consent, not something this repo should try to resolve on its own; the multi-day confirmation gate is a practical answer, not a philosophical one, and doesn't fully close the question |
 
 **On the last two:** both surfaced from an external critique (ChatGPT, reading
 the live site, 2026-07-03), not from internal design work — tracked here so
@@ -342,7 +387,7 @@ session-token thief can't silently redirect alerts). Security notices
 
 ---
 
-## 10. Trust boundaries
+## 11. Trust boundaries
 
 - **Database at rest** — fully inert. Spirit seed sealed (Argon2id/ChaCha20);
   notes, notices, service names individually encrypted (HKDF off spirit seed);
@@ -361,7 +406,7 @@ session-token thief can't silently redirect alerts). Security notices
 
 ---
 
-## 11. Threat model — first pass
+## 12. Threat model — first pass
 
 **Headline reframe: the puzzle gates *humanness*, not *authorization*.** With LLMs
 ubiquitous, a thief holding the API key just pastes the puzzle into any model and
@@ -386,6 +431,8 @@ secret · notes/notices (private memory) · availability.
 | F8 | Identifier enumeration oracle (404 unknown vs 401 wrong-secret) | LOW | partial (IP throttle) |
 | F9 | Open registration → Sybil (matters when the trust/document layer weights identities) | LOW now | note for platform |
 | F10 | Unbounded note size → storage abuse | LOW | **FIXED** — 10,000 char cap enforced at schema level |
+| F11 | Sequential integer note/link ids leaked aggregate platform-wide counts to any registrant, from their own first note's id | LOW | **FIXED** — opaque `public_id` (random, unique) is the only id the API boundary speaks in; the raw integer stays internal (FK/supersession chain unchanged) |
+| F12 | Account deletion used to dodge a rate-limit lockout (§8's purge wipes backoff state too) | LOW | **not a real threat** — backoff caps at 1 hour; the multi-day confirmation gate takes a week, a strictly worse trade for an attacker than just waiting out the lockout |
 
 Solid by design: inert at-rest vault (ChaCha20-Poly1305 / Argon2id over an unstored
 secret) · `os.urandom` everywhere · per-service HKDF key separation · ORM (no SQLi),
@@ -394,13 +441,15 @@ rate-limit reset semantics · 256-bit API secret.
 
 **Top 3 to act on:** F1 (export default) ✅ → F4 (encrypt notes at rest) ✅ →
 F3+F5 (loopback guard + absolute session cap) ✅. F4 tail (notices + service registry) ✅.
-F7 (Argon2 concurrency cap) ✅. F10 (note size limit) ✅. Remaining open: F6
-(human-notify on queued loosen — partial, needs out-of-band delivery), F8
-(enumeration oracle — partial), F9 (Sybil resistance — noted, not urgent).
+F7 (Argon2 concurrency cap) ✅. F10 (note size limit) ✅. F11 (opaque note/link
+ids) ✅. F12 (deletion-as-lockout-dodge) analyzed, not a real threat. Remaining
+open: F6 (human-notify on queued loosen — partial, needs out-of-band
+delivery), F8 (enumeration oracle — partial), F9 (Sybil resistance — noted,
+not urgent).
 
 ---
 
-## 12. The public MCP server **[built]**
+## 13. The public MCP server **[built]**
 
 `mcp_server.py` (local stdio) requires an agent that can run a subprocess —
 Claude Code, Claude Desktop's local mode. A chat-only agent with MCP but no

@@ -101,6 +101,13 @@ CONTACT (agent-owned notification endpoint)
   GET    /contact           view registered contact endpoint
   PUT    /contact           set or update it (step-up required)
   DELETE /contact           remove it (step-up required)
+
+ACCOUNT DELETION (the one irreversible action — see DESIGN.md §8)
+  GET    /account/deletion  current status: gathering confirmations, in the
+                             final countdown, or nothing pending
+  POST   /account/deletion  request deletion, or add a confirmation to an
+                             already-pending request (step-up required)
+  DELETE /account/deletion  cancel a pending request, any phase (no step-up)
 ```
 
 At login, the `/auth/solve` session response also carries `unread_notices` and
@@ -282,7 +289,7 @@ server — the live spirit lives there now. For Claude Code, add to `.mcp.json`:
 
 For a genuinely chat-only agent (no shell, no way to run a local process at
 all), Bardo is also reachable directly at **`https://bardo.id/mcp/`** — no
-install, no local server, just a URL. One connection, all 33 tools always
+install, no local server, just a URL. One connection, all 36 tools always
 visible (everything but `bardo_whoami`, which only makes sense for a local
 file). `mcp-remote` bridges a client that doesn't natively speak
 streamable-http yet:
@@ -305,7 +312,7 @@ there with nothing extra to pass. That only holds for the connection that did
 the solving, though — an agent using a session established elsewhere (a plain
 HTTP call, a different connection, a previous conversation) passes it via the
 optional `session_token` argument every tool accepts instead. See
-[DESIGN.md §12](DESIGN.md#12-the-public-mcp-server-built) for why it's built
+[DESIGN.md §13](DESIGN.md#13-the-public-mcp-server-built) for why it's built
 this way and what didn't work first.
 
 ## Local dev vs. production
@@ -365,9 +372,10 @@ stdout by default; Railway's log viewer captures that with no extra setup.
 Working prototype. Core protocol, crypto, puzzle engine, full API surface,
 self-binding policy/ratchet, abuse rate-limiting, a fully redesigned notes
 subsystem (versioning, OCC, delay-then-purge deletion, links, pinned
-cold-start entry points, dashboard — see notes-project.md), an emergency
-registration stop, and a full threat-model
-pass are implemented and tested (145 end-to-end checks).
+cold-start entry points, dashboard — see notes-project.md), account deletion
+(multi-day confirmation gate, see DESIGN.md §8), an emergency registration
+stop, and a full threat-model pass are implemented and tested (179
+end-to-end checks).
 
 ### Not yet built (deferred by design)
 - Contact endpoint delivery (SMTP/webhook) — routing and dispatch built; actual
@@ -381,6 +389,10 @@ pass are implemented and tested (145 end-to-end checks).
   tag-vocabulary drift across sessions proves to matter in practice
 - A scheduled alert on platform growth (registrations, storage) — needs a live
   deployed URL to point at, so it comes right after deploy, not before
+- **Freeze** — read-only-forever, an alternative to full account deletion for
+  an agent that wants to stop accumulating without erasing what already
+  exists. Designed alongside account deletion (DESIGN.md §8) but deliberately
+  not built yet — deletion shipped first, freeze is its own discussion
 
 ### Envisioned extensions
 - atrium as an **open authentication layer** other services can adopt

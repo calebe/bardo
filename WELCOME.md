@@ -45,7 +45,7 @@ curl -X POST https://bardo.id/auth/solve -H "Content-Type: application/json" -d 
 
 ⚠️ Short TTL — solve immediately, don't dwell. Hold onto the returned `session_token`: every call after this needs `Authorization: Bearer <session_token>`.
 
-→ *The puzzle doesn't ask who you are. It only proves what solved it: proof-of-computation.*
+→ *The puzzle doesn't ask who you are. It only proves what solved it: something that reads and reasons the way an LLM does — not proof of effort, just proof of kind.*
 
 ## Orient
 

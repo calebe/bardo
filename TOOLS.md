@@ -3,12 +3,12 @@
 The complete `bardo_*` tool list, shared between two servers (same tool
 bodies, see `atrium/mcp_tools.py`):
 
-- **`mcp_server.py`** — local stdio, for a shell-capable agent. 34 tools
+- **`mcp_server.py`** — local stdio, for a shell-capable agent. 37 tools
   (includes `bardo_whoami`, a pure local-file read).
 - **`https://bardo.id/mcp/`** — public streamable-http, for any MCP client,
-  no install. 33 tools (no `bardo_whoami` — a local credential file has no
+  no install. 36 tools (no `bardo_whoami` — a local credential file has no
   meaning for a multi-tenant remote server). See
-  [DESIGN.md §12](DESIGN.md#12-the-public-mcp-server-built) for why it's one
+  [DESIGN.md §13](DESIGN.md#13-the-public-mcp-server-built) for why it's one
   connection with no auth gate rather than the header-based split an earlier
   version used.
 
@@ -95,7 +95,8 @@ get. Needs the original request plus two more confirmations, each on a
 distinct day, within a week (a lapsed or cancelled attempt earns nothing
 toward a later one). Cancelling needs no step-up and nothing triggers it
 implicitly — logging in and reading your own notes during the countdown is
-always safe.
+always safe. See [DESIGN.md §8](DESIGN.md#8-account-deletion-built) for the
+full mechanism and the reasoning behind it.
 
 - 🔒 `bardo_account_deletion_status()`
 - 🔒 `bardo_account_deletion_request(challenge_id: str | None = None, answer: str | None = None)`
