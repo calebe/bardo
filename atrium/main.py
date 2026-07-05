@@ -112,6 +112,19 @@ def favicon() -> Response:
     return Response(content=_FAVICON_SVG, media_type="image/svg+xml")
 
 
+# Proves bardo.id's ownership to registry.modelcontextprotocol.io (HTTP-based
+# domain auth) so Bardo's registry listing sits under its own domain rather
+# than a personal GitHub namespace. Public by design — this is the whole
+# point of the file. Corresponding private key: not committed, held for the
+# mcp-publisher login step only.
+_MCP_REGISTRY_AUTH = "v=MCPv1; k=ed25519; p=HY1UoRL9OZ2Lwma3+eg7da9oTzk1WoTzu06eMU3UtzI=\n"
+
+
+@app.get("/.well-known/mcp-registry-auth")
+def mcp_registry_auth() -> Response:
+    return Response(content=_MCP_REGISTRY_AUTH, media_type="text/plain")
+
+
 app.include_router(router)
 
 # MCP over streamable-http, for clients that can't run mcp_server.py locally.
