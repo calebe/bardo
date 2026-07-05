@@ -58,19 +58,27 @@ from pathlib import Path
 # Duplicate values across differently-named facts are welcome — good fuel for
 # decoys and confusion.
 #
-# Lives in an external file, not inline, on purpose: the puzzle's whole
+# Lives outside the source tree, not inline, on purpose: the puzzle's whole
 # security property is that these mappings cost a human a lookup — publishing
-# them as source hands out the cheat sheet. `facts.json` (gitignored) holds
-# the real pool; `facts.example.json` (tracked) is a smaller, different set
-# so the open-source code still runs out of the box. Real deployments should
-# supply their own `facts.json`, not rely on the example set staying secret.
+# them as source hands out the cheat sheet. Three tiers, checked in order:
+#   1. BARDO_FACTS_JSON env var (the real pool, in production — set once on
+#      the host, never committed; git-based deploys have no other way to see
+#      a gitignored file).
+#   2. facts.json next to this file (the real pool, for local dev — gitignored).
+#   3. facts.example.json (tracked) — a smaller, different set so the
+#      open-source code still runs out of the box with no setup.
+# Real deployments should supply their own facts, not rely on the example
+# set staying secret — it's public by construction.
 # --------------------------------------------------------------------------- #
 def _load_facts() -> list[tuple[str, int]]:
-    here = Path(__file__).parent
-    path = here / "facts.json"
-    if not path.exists():
-        path = here / "facts.example.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
+    raw = os.environ.get("BARDO_FACTS_JSON")
+    if raw is None:
+        here = Path(__file__).parent
+        path = here / "facts.json"
+        if not path.exists():
+            path = here / "facts.example.json"
+        raw = path.read_text(encoding="utf-8")
+    data = json.loads(raw)
     return [(clue, value) for clue, value in data]
 
 
