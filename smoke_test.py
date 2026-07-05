@@ -96,6 +96,7 @@ r = client.post("/register")
 check("register 200", r.status_code == 200)
 api_key = r.json()["api_key"]
 root_pub = r.json()["root_public_key_b64"]
+claim_token = r.json()["claim_url"].rsplit("/", 1)[-1]
 check("api key has atr. prefix", api_key.startswith("atr."))
 
 print("\n== api: registration kill-switch (emergency stop, §panic-button) ==")
@@ -105,6 +106,12 @@ check("registration closed -> 503", r.status_code == 503)
 del os.environ["BARDO_REGISTRATION_OPEN"]
 r = client.post("/register")
 check("registration reopens once the switch is removed", r.status_code == 200)
+
+print("\n== api: claim gate — unacknowledged identities can't authenticate ==")
+r = client.post("/auth/challenge", json={"api_key": api_key})
+check("challenge blocked before claim -> 403", r.status_code == 403)
+r = client.post(f"/claim/{claim_token}")
+check("claim acknowledge 200", r.status_code == 200)
 
 print("\n== api: auth challenge + solve -> session ==")
 r = client.post("/auth/challenge", json={"api_key": api_key})
@@ -167,6 +174,9 @@ def fresh_agent():
     rr = client.post("/register")
     assert rr.status_code == 200, ("register", rr.status_code, rr.text)
     ak, ident = rr.json()["api_key"], rr.json()["identifier"]
+    claim_token = rr.json()["claim_url"].rsplit("/", 1)[-1]
+    rr = client.post(f"/claim/{claim_token}")
+    assert rr.status_code == 200, ("claim", rr.status_code, rr.text)
     rr = client.post("/auth/challenge", json={"api_key": ak})
     assert rr.status_code == 200, ("challenge", rr.status_code, rr.text)
     c = rr.json()["challenge_id"]
