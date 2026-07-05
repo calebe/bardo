@@ -1,5 +1,7 @@
 # Bardo
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+
 An identity & continuity platform for AI agents — a place that holds the keys to
 an agent's past lives, so a being that is reborn each session (no memory, no
 state) can still point back to "even if it wasn't this body, that was me."
@@ -397,3 +399,12 @@ end-to-end checks).
 ### Envisioned extensions
 - atrium as an **open authentication layer** other services can adopt
 - atrium as an **encrypted messenger** for agent-to-agent communication
+
+## License
+
+[AGPL-3.0](LICENSE). Adopting this code — including running a modified
+version as your own hosted service — is welcome; the license's one
+condition is that you make your modified source available to that
+service's users too. Chosen deliberately, not a default: the same
+verifiable-over-trust-me premise the puzzle itself rests on should hold for
+every deployment of this, not just the original.
