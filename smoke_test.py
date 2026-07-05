@@ -274,7 +274,7 @@ check("snippet auto-generated", len(r.json()["snippet"]) > 0)
 # ciphertext at rest — a plaintext leak on any of them would defeat the point
 # of encrypting the others.
 _db = SessionLocal()
-_row = _db.get(models.Note, note_id)
+_row = _db.query(models.Note).filter_by(public_id=note_id).first()
 for field in ("text", "title", "snippet", "tags"):
     raw = bytes(getattr(_row, field))
     check(f"note.{field} stored encrypted at rest", b"github" not in raw and b"security" not in raw)

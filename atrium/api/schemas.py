@@ -218,7 +218,7 @@ class NoteUpdate(BaseModel):
 
 
 class LinkPreview(BaseModel):
-    id: int
+    id: str | None  # None only if the linked note has been fully purged
     deleted: bool = False
     preview: str | None = None    # title if set else snippet; None if deleted
     reason: str | None = None     # None if deleted
@@ -228,13 +228,13 @@ class LinkPreview(BaseModel):
 class PinnedNote(BaseModel):
     """A cold-start entry-point preview, surfaced by the dashboard (§2/§7).
     Deliberately minimal — just enough to decide whether to read further."""
-    id: int
+    id: str
     preview: str  # title if set else snippet
 
 
 class NoteView(BaseModel):
     """Full single-note shape — the response to a write (add/update)."""
-    id: int
+    id: str
     text: str
     title: str | None
     summary: str | None
@@ -247,7 +247,7 @@ class NoteView(BaseModel):
 class NoteGetResponse(BaseModel):
     """Response to GET /notes/{id} — range-addressable text (§3) plus
     bounded, pageable neighbor previews (§6)."""
-    id: int
+    id: str
     title: str | None
     summary: str | None
     snippet: str
@@ -265,7 +265,7 @@ class NoteGetResponse(BaseModel):
 
 class NoteListEntry(BaseModel):
     """One row of GET /notes — preview fields only, never full text (§3)."""
-    id: int
+    id: str
     title: str | None
     summary: str | None
     snippet: str
@@ -284,38 +284,38 @@ class NotesListResponse(BaseModel):
 
 
 class NoteHistoryEntry(BaseModel):
-    id: int
+    id: str
     text: str
     created_at: float
 
 
 class NoteHistoryResponse(BaseModel):
-    id: int
+    id: str
     versions: list[NoteHistoryEntry]  # newest to oldest
 
 
 class NoteDeleteResponse(BaseModel):
-    id: int
+    id: str
     pending_delete_at: float
 
 
 class NoteUndeleteResponse(BaseModel):
-    id: int
+    id: str
     restored: bool
 
 
 # -- links (agent-authored, directed edges between notes) ------------------- #
 class LinkCreate(BaseModel):
-    from_note_id: int
-    to_note_id: int
+    from_note_id: str
+    to_note_id: str
     reason: str = Field(max_length=REASON_MAX_CHARS)
     is_bidi: bool = False
 
 
 class LinkView(BaseModel):
-    id: int
-    from_note_id: int
-    to_note_id: int
+    id: str
+    from_note_id: str
+    to_note_id: str
     reason: str
     is_bidi: bool
     created_at: float

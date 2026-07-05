@@ -443,7 +443,7 @@ def main():
     s = sub.add_parser("note")
     s.add_argument("action", choices=["add", "list", "get", "update", "del", "undelete", "history"])
     s.add_argument("text", nargs="?", default="", help="full text (add), or full replacement (update)")
-    s.add_argument("--id", type=int)
+    s.add_argument("--id")
     s.add_argument("--title")
     s.add_argument("--summary")
     s.add_argument("--tags")
@@ -461,10 +461,10 @@ def main():
 
     s = sub.add_parser("link")
     s.add_argument("action", choices=["add", "del"])
-    s.add_argument("from_id", nargs="?", type=int)
-    s.add_argument("to_id", nargs="?", type=int)
+    s.add_argument("from_id", nargs="?")
+    s.add_argument("to_id", nargs="?")
     s.add_argument("reason", nargs="?", default="")
-    s.add_argument("--id", type=int, help="link id, for del")
+    s.add_argument("--id", help="link id, for del")
     s.add_argument("--bidi", action="store_true")
     s.set_defaults(fn=cmd_link)
 

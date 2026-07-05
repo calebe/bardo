@@ -658,9 +658,13 @@ def _preview_text(db: DbSession, spirit_seed: bytes, n: models.Note) -> str:
     return _ensure_snippet(db, spirit_seed, n)
 
 
+def _new_public_id() -> str:
+    return crypto.b64e(os.urandom(12))
+
+
 def _note_view(db: DbSession, n: models.Note, spirit_seed: bytes) -> schemas.NoteView:
     return schemas.NoteView(
-        id=n.id,
+        id=n.public_id,
         text=crypto.decrypt_note(spirit_seed, n.text),
         title=crypto.decrypt_note_title(spirit_seed, n.title) if n.title else None,
         summary=crypto.decrypt_note_summary(spirit_seed, n.summary) if n.summary else None,
@@ -685,16 +689,16 @@ def _resolve_head(db: DbSession, n: models.Note) -> models.Note:
     return n
 
 
-def _owned_note_exact(db: DbSession, sess, note_id: int) -> models.Note:
-    """Fetch by id with no forward-resolution — used where the exact row
-    matters (the OCC anchor for a text edit)."""
-    n = db.get(models.Note, note_id)
+def _owned_note_exact(db: DbSession, sess, note_id: str) -> models.Note:
+    """Fetch by public_id with no forward-resolution — used where the exact
+    row matters (the OCC anchor for a text edit)."""
+    n = db.query(models.Note).filter(models.Note.public_id == note_id).first()
     if n is None or n.agent_id != sess.identifier:
         raise HTTPException(404, "note not found")
     return n
 
 
-def _owned_note_visible(db: DbSession, sess, note_id: int) -> models.Note:
+def _owned_note_visible(db: DbSession, sess, note_id: str) -> models.Note:
     """Fetch by id, resolve forward to head, 404 if unowned or pending/gone."""
     n = _owned_note_exact(db, sess, note_id)
     head = _resolve_head(db, n)
@@ -824,15 +828,19 @@ def _link_preview(db: DbSession, spirit_seed: bytes, link: models.Link, viewpoin
     is_outgoing = link.from_note_id == viewpoint_id
     other_id = link.to_note_id if is_outgoing else link.from_note_id
     other = db.get(models.Note, other_id)
-    if other is None or other.pending_delete_at is not None:
-        return schemas.LinkPreview(id=other_id, deleted=True)
+    if other is None:
+        # Fully purged (grace period elapsed and swept) — no row left to
+        # read a public_id from at all, unlike the merely-pending case below.
+        return schemas.LinkPreview(id=None, deleted=True)
+    if other.pending_delete_at is not None:
+        return schemas.LinkPreview(id=other.public_id, deleted=True)
     head = _resolve_head(db, other)
     if head.pending_delete_at is not None:
-        return schemas.LinkPreview(id=head.id, deleted=True)
+        return schemas.LinkPreview(id=head.public_id, deleted=True)
 
     direction = None if link.is_bidi else ("out" if is_outgoing else "in")
     return schemas.LinkPreview(
-        id=head.id, deleted=False, preview=_preview_text(db, spirit_seed, head),
+        id=head.public_id, deleted=False, preview=_preview_text(db, spirit_seed, head),
         reason=crypto.decrypt_link_reason(spirit_seed, link.reason), direction=direction,
     )
 
@@ -879,6 +887,7 @@ def note_add(req: schemas.NoteCreate, sess=Depends(require_session), db: DbSessi
 
     n = models.Note(
         agent_id=sess.identifier,
+        public_id=_new_public_id(),
         text=crypto.encrypt_note(sess.spirit_seed, req.text),
         title=title_b, summary=summary_b, snippet=snippet_b,
         tags=tags_b, tags_encrypted=tags_enc,
@@ -918,7 +927,7 @@ def notes_list(
         try:
             links, total_links = _note_links_page(db, sess.spirit_seed, n.id, 0, schemas.LINKS_PAGE_DEFAULT)
             entries.append(schemas.NoteListEntry(
-                id=n.id,
+                id=n.public_id,
                 title=crypto.decrypt_note_title(sess.spirit_seed, n.title) if n.title else None,
                 summary=crypto.decrypt_note_summary(sess.spirit_seed, n.summary) if n.summary else None,
                 snippet=_ensure_snippet(db, sess.spirit_seed, n),
@@ -937,7 +946,7 @@ def notes_list(
 
 @router.get("/notes/{note_id}", response_model=schemas.NoteGetResponse)
 def note_get(
-    note_id: int,
+    note_id: str,
     offset: int = 0,
     length: int | None = None,
     links_offset: int = 0,
@@ -954,7 +963,7 @@ def note_get(
         links, total_links = _note_links_page(db, sess.spirit_seed, n.id, links_offset, links_limit)
 
         return schemas.NoteGetResponse(
-            id=n.id,
+            id=n.public_id,
             title=crypto.decrypt_note_title(sess.spirit_seed, n.title) if n.title else None,
             summary=crypto.decrypt_note_summary(sess.spirit_seed, n.summary) if n.summary else None,
             snippet=_ensure_snippet(db, sess.spirit_seed, n),
@@ -970,7 +979,7 @@ def note_get(
 
 
 @router.get("/notes/{note_id}/history", response_model=schemas.NoteHistoryResponse)
-def note_history(note_id: int, sess=Depends(require_session), db: DbSession = Depends(get_db)):
+def note_history(note_id: str, sess=Depends(require_session), db: DbSession = Depends(get_db)):
     n = _owned_note_exact(db, sess, note_id)
     head = _resolve_head(db, n)
     if head.pending_delete_at is not None:
@@ -979,14 +988,14 @@ def note_history(note_id: int, sess=Depends(require_session), db: DbSession = De
     node: models.Note | None = head
     while node is not None:
         versions.append(schemas.NoteHistoryEntry(
-            id=node.id, text=crypto.decrypt_note(sess.spirit_seed, node.text), created_at=node.created_at,
+            id=node.public_id, text=crypto.decrypt_note(sess.spirit_seed, node.text), created_at=node.created_at,
         ))
         node = db.get(models.Note, node.supersedes) if node.supersedes else None
-    return schemas.NoteHistoryResponse(id=note_id, versions=versions)
+    return schemas.NoteHistoryResponse(id=head.public_id, versions=versions)
 
 
 @router.patch("/notes/{note_id}", response_model=schemas.NoteView)
-def note_update(note_id: int, req: schemas.NoteUpdate, sess=Depends(require_session), db: DbSession = Depends(get_db)):
+def note_update(note_id: str, req: schemas.NoteUpdate, sess=Depends(require_session), db: DbSession = Depends(get_db)):
     for fld in req.clear:
         if fld not in ("title", "summary", "tags"):
             raise HTTPException(
@@ -1055,6 +1064,7 @@ def note_update(note_id: int, req: schemas.NoteUpdate, sess=Depends(require_sess
     pinned = _resolve_pinned(db, sess.identifier, n, req.pinned)
     new_version = models.Note(
         agent_id=sess.identifier,
+        public_id=_new_public_id(),
         text=crypto.encrypt_note(sess.spirit_seed, new_text),
         title=title_b, summary=summary_b,
         snippet=_make_snippet_blob(sess, new_text, summary_b),
@@ -1074,18 +1084,18 @@ def note_update(note_id: int, req: schemas.NoteUpdate, sess=Depends(require_sess
 
 
 @router.delete("/notes/{note_id}", response_model=schemas.NoteDeleteResponse)
-def note_delete(note_id: int, sess=Depends(require_session), db: DbSession = Depends(get_db)):
+def note_delete(note_id: str, sess=Depends(require_session), db: DbSession = Depends(get_db)):
     agent = _load_agent(db, sess.identifier)
     n = _owned_note_visible(db, sess, note_id)
     _rate_limited_write(sess.identifier)
     pol = resolve_policy(db, agent, sess.spirit_seed)
     n.pending_delete_at = time.time() + pol.delete_grace_seconds
     db.commit()
-    return schemas.NoteDeleteResponse(id=n.id, pending_delete_at=n.pending_delete_at)
+    return schemas.NoteDeleteResponse(id=n.public_id, pending_delete_at=n.pending_delete_at)
 
 
 @router.post("/notes/{note_id}/undelete", response_model=schemas.NoteUndeleteResponse)
-def note_undelete(note_id: int, sess=Depends(require_session), db: DbSession = Depends(get_db)):
+def note_undelete(note_id: str, sess=Depends(require_session), db: DbSession = Depends(get_db)):
     n = _owned_note_exact(db, sess, note_id)
     if n.superseded_by is not None:
         raise HTTPException(404, "note not found")
@@ -1095,7 +1105,7 @@ def note_undelete(note_id: int, sess=Depends(require_session), db: DbSession = D
         raise HTTPException(403, f"restoring would exceed the note limit ({schemas.NOTES_HARD_CAP})")
     n.pending_delete_at = None
     db.commit()
-    return schemas.NoteUndeleteResponse(id=n.id, restored=True)
+    return schemas.NoteUndeleteResponse(id=n.public_id, restored=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -1109,6 +1119,7 @@ def link_create(req: schemas.LinkCreate, sess=Depends(require_session), db: DbSe
 
     link = models.Link(
         agent_id=sess.identifier,
+        public_id=_new_public_id(),
         from_note_id=a.id, to_note_id=b.id,
         reason=crypto.encrypt_link_reason(sess.spirit_seed, req.reason),
         is_bidi=req.is_bidi,
@@ -1117,14 +1128,14 @@ def link_create(req: schemas.LinkCreate, sess=Depends(require_session), db: DbSe
     db.commit()
     db.refresh(link)
     return schemas.LinkView(
-        id=link.id, from_note_id=link.from_note_id, to_note_id=link.to_note_id,
+        id=link.public_id, from_note_id=a.public_id, to_note_id=b.public_id,
         reason=req.reason, is_bidi=link.is_bidi, created_at=link.created_at,
     )
 
 
 @router.delete("/links/{link_id}")
-def link_delete(link_id: int, sess=Depends(require_session), db: DbSession = Depends(get_db)):
-    link = db.get(models.Link, link_id)
+def link_delete(link_id: str, sess=Depends(require_session), db: DbSession = Depends(get_db)):
+    link = db.query(models.Link).filter(models.Link.public_id == link_id).first()
     if link is None or link.agent_id != sess.identifier:
         raise HTTPException(404, "link not found")
     db.delete(link)
@@ -1170,7 +1181,7 @@ def dashboard(sess=Depends(require_session), db: DbSession = Depends(get_db)):
         .all()
     )
     pinned = [
-        schemas.PinnedNote(id=n.id, preview=_preview_text(db, sess.spirit_seed, n))
+        schemas.PinnedNote(id=n.public_id, preview=_preview_text(db, sess.spirit_seed, n))
         for n in pinned_rows
     ]
 

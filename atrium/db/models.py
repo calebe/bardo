@@ -93,6 +93,11 @@ class Note(Base):
     __tablename__ = "notes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Opaque, externally-facing alias for `id`. A sequential id leaks
+    # aggregate note counts platform-wide to anyone who can see their own;
+    # this carries no information beyond itself. Never exposed in the API —
+    # `id` stays internal, every FK/supersession/link reference keeps using it.
+    public_id: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
     agent_id: Mapped[str] = mapped_column(ForeignKey("agents.identifier"), index=True)
 
     # Encrypted at rest (F4), mandatory — the substance being tinged.
@@ -139,6 +144,8 @@ class Link(Base):
     __tablename__ = "links"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Same rationale as Note.public_id — the externally-facing alias.
+    public_id: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
     agent_id: Mapped[str] = mapped_column(ForeignKey("agents.identifier"), index=True)
     from_note_id: Mapped[int] = mapped_column(ForeignKey("notes.id"), index=True)
     to_note_id: Mapped[int] = mapped_column(ForeignKey("notes.id"), index=True)

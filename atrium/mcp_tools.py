@@ -286,7 +286,7 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
 
     @mcp.tool()
     async def bardo_note_get(
-        note_id: int, offset: int = 0, length: int | None = None,
+        note_id: str, offset: int = 0, length: int | None = None,
         links_offset: int = 0, links_limit: int = 10,
         session_token: str | None = None, ctx: Context = None,
     ) -> dict:
@@ -300,14 +300,14 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
                            session_token=session_token, ctx=ctx)
 
     @mcp.tool()
-    async def bardo_note_history(note_id: int, session_token: str | None = None, ctx: Context = None) -> dict:
+    async def bardo_note_history(note_id: str, session_token: str | None = None, ctx: Context = None) -> dict:
         """See every surviving version of a note (newest to oldest, up to the
         last 10 edits) — the actual wording at each point, not just metadata."""
         return await call("GET", f"/notes/{note_id}/history", auth=True, session_token=session_token, ctx=ctx)
 
     @mcp.tool()
     async def bardo_note_update(
-        note_id: int,
+        note_id: str,
         text: str | None = None,
         append_text: str | None = None,
         find: str | None = None,
@@ -340,7 +340,7 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
                            session_token=session_token, ctx=ctx)
 
     @mcp.tool()
-    async def bardo_note_delete(note_id: int, session_token: str | None = None, ctx: Context = None) -> dict:
+    async def bardo_note_delete(note_id: str, session_token: str | None = None, ctx: Context = None) -> dict:
         """Delete a note (the whole thing, all versions together). Not
         immediate — it disappears from view right away but is only purged for
         real after a grace period, so bardo_note_undelete can still bring it
@@ -348,13 +348,13 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         return await call("DELETE", f"/notes/{note_id}", auth=True, session_token=session_token, ctx=ctx)
 
     @mcp.tool()
-    async def bardo_note_undelete(note_id: int, session_token: str | None = None, ctx: Context = None) -> dict:
+    async def bardo_note_undelete(note_id: str, session_token: str | None = None, ctx: Context = None) -> dict:
         """Restore a note that's still within its post-delete grace period."""
         return await call("POST", f"/notes/{note_id}/undelete", auth=True, session_token=session_token, ctx=ctx)
 
     # -- links ------------------------------------------------------------------#
     @mcp.tool()
-    async def bardo_link_add(from_note_id: int, to_note_id: int, reason: str, is_bidi: bool = False,
+    async def bardo_link_add(from_note_id: str, to_note_id: str, reason: str, is_bidi: bool = False,
                               session_token: str | None = None, ctx: Context = None) -> dict:
         """Connect two notes with a reason, written from from_note_id's
         perspective ("clarifies my earlier assumption about X"). Set is_bidi=True
@@ -365,7 +365,7 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         return await call("POST", "/links", auth=True, body=body, session_token=session_token, ctx=ctx)
 
     @mcp.tool()
-    async def bardo_link_delete(link_id: int, session_token: str | None = None, ctx: Context = None) -> dict:
+    async def bardo_link_delete(link_id: str, session_token: str | None = None, ctx: Context = None) -> dict:
         """Remove a link between two notes."""
         return await call("DELETE", f"/links/{link_id}", auth=True, session_token=session_token, ctx=ctx)
 
