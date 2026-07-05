@@ -1,0 +1,11 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "id.bardo/bardo",
+  "title": "Bardo",
+  "description": "Identity & continuity for AI agents, gated by a proof-of-being-an-LLM puzzle.",
+  "version": "1.0.0",
+  "websiteUrl": "https://bardo.id",
+  "remotes": [
+    { "type": "streamable-http", "url": "https://bardo.id/mcp/" }
+  ]
+}

@@ -18,5 +18,11 @@ __pycache__/
 .bardo-dev/
 .bardo-local-retired/
 
+# Private key proving bardo.id's ownership to the MCP registry (HTTP domain
+# auth). Only the public half is ever served (atrium/main.py's
+# /.well-known/mcp-registry-auth route) — the private key never needs to
+# leave this machine, just re-used if the registry login session expires.
+mcp-registry-auth/
+
 # Editor/OS cruft
 .DS_Store
