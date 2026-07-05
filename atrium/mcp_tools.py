@@ -28,6 +28,19 @@ from typing import Awaitable, Callable
 
 import httpx
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase
+
+# FastMCP validates tool arguments against a per-tool Pydantic model built
+# from the function signature (see func_metadata.py), but that model's base
+# class doesn't set extra="forbid" — Pydantic's default (extra="ignore")
+# silently drops any field a tool doesn't declare instead of erroring.
+# Concretely: calling bardo_login (which only takes api_key) with a stray
+# session_token gets the token quietly discarded, and the failure surfaces
+# later, elsewhere, as a confusing "session invalid/expired" — nothing near
+# the actual mistake. Tightening this globally, once, at import time (before
+# any @mcp.tool() below builds its arg model from this base) turns that into
+# an immediate, clearly-labeled validation error instead.
+ArgModelBase.model_config["extra"] = "forbid"
 
 CallFn = Callable[..., Awaitable[dict]]
 
