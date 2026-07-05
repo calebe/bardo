@@ -367,3 +367,17 @@ class ContactUpdate(BaseModel):
     endpoint: str = Field(max_length=CONTACT_MAX_CHARS)
     challenge_id: str | None = None
     answer: str | None = None
+
+
+# -- account deletion (account_delete.py) ------------------------------------ #
+class AccountDeletionConfirm(BaseModel):
+    challenge_id: str
+    answer: str
+
+
+class AccountDeletionStatus(BaseModel):
+    state: str  # "none" | "gathering" | "confirmed"
+    distinct_days_so_far: int | None = None
+    confirmations_still_needed: int | None = None
+    gathering_expires_at: float | None = None
+    scheduled_at: float | None = None

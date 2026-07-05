@@ -34,6 +34,10 @@ Usage:
     python cli.py policy set --export-mode allow            # prints a step-up puzzle
     python cli.py policy solve "<answer>"                   # then submits the queued fields
     python cli.py policy abort
+    python cli.py account status
+    python cli.py account delete                            # prints a step-up puzzle
+    python cli.py account solve "<answer>"                  # repeat on separate days (3 total)
+    python cli.py account cancel                            # any time before the scheduled purge
 """
 
 from __future__ import annotations
@@ -314,6 +318,54 @@ def cmd_dashboard(_):
           f"delete_grace={pol['delete_grace_seconds']}s")
 
 
+PENDING_ACCOUNT_DELETE = HOME / "pending_account_delete.json"
+
+
+def cmd_account(args):
+    with _client() as c:
+        if args.action == "status":
+            d = _check(c.get("/account/deletion", headers=_auth()))
+            if d["state"] == "none":
+                print("account deletion: none pending")
+            elif d["state"] == "gathering":
+                print(f"account deletion: gathering confirmations — "
+                      f"{d['confirmations_still_needed']} more needed, "
+                      f"expires at {d['gathering_expires_at']} (unix time)")
+            else:
+                print(f"account deletion: CONFIRMED — scheduled for "
+                      f"{d['scheduled_at']} (unix time). cancel any time before "
+                      f"then:  python cli.py account cancel")
+
+        elif args.action == "delete":
+            d = _check(c.post("/auth/stepup", headers=_auth()))
+            _save(PENDING_ACCOUNT_DELETE, {"challenge_id": d["challenge_id"]})
+            print(f"STEP-UP PUZZLE  (ttl {d['ttl_seconds']}s) — this is the one "
+                  f"genuinely irreversible action. solve it, then:  "
+                  f"python cli.py account solve \"<answer>\"\n")
+            print(d["puzzle"])
+
+        elif args.action == "solve":
+            if not args.text:
+                _die("usage: bardo account solve \"<answer>\"")
+            pend = _load(PENDING_ACCOUNT_DELETE) or _die(
+                "no pending deletion step-up — run:  python cli.py account delete"
+            )
+            d = _check(c.post("/account/deletion", json={
+                "challenge_id": pend["challenge_id"], "answer": args.text,
+            }, headers=_auth()))
+            PENDING_ACCOUNT_DELETE.unlink(missing_ok=True)
+            if d["state"] == "confirmed":
+                print(f"confirmed. scheduled for {d['scheduled_at']} (unix time) — "
+                      f"cancel any time before then:  python cli.py account cancel")
+            else:
+                print(f"confirmation recorded — {d['confirmations_still_needed']} more "
+                      f"needed, on separate days, by {d['gathering_expires_at']} (unix time)")
+
+        elif args.action == "cancel":
+            d = _check(c.delete("/account/deletion", headers=_auth()))
+            print("deletion cancelled" if d["state"] == "none" else "unexpected state:", d)
+
+
 def cmd_contact(args):
     with _client() as c:
         if args.action == "get":
@@ -476,6 +528,11 @@ def main():
     s.add_argument("action", choices=["get", "set", "del", "solve"])
     s.add_argument("text", nargs="?", default="")
     s.set_defaults(fn=cmd_contact)
+
+    s = sub.add_parser("account")
+    s.add_argument("action", choices=["status", "delete", "solve", "cancel"])
+    s.add_argument("text", nargs="?", default="", help="answer, for solve")
+    s.set_defaults(fn=cmd_account)
 
     s = sub.add_parser("policy")
     s.add_argument("action", choices=["get", "set", "abort", "solve"])

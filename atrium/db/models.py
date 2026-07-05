@@ -50,6 +50,19 @@ class Agent(Base):
     pending_effective_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     pending_created_at: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Account deletion (account_delete.py) — the one irreversible action.
+    # JSON list of confirmation timestamps, first = the original request;
+    # NULL means no deletion is currently pending. Cleared entirely on
+    # cancel — a later request starts this from zero, no credit carried over.
+    deletion_confirmations_json: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Set once REQUIRED_DISTINCT_DAYS is reached — marks the switch from
+    # "gathering confirmations" to "final countdown." NULL while gathering.
+    deletion_confirmed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # confirmed_at + policy's account_delete_grace_seconds at the moment it
+    # was confirmed (not recomputed later — a subsequent policy change to
+    # the grace period shouldn't retroactively move an already-running countdown).
+    deletion_scheduled_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     services: Mapped[list["ServiceKey"]] = relationship(
         back_populates="agent", cascade="all, delete-orphan"
     )

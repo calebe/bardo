@@ -252,7 +252,7 @@ Two ways in, depending on what the agent can actually run.
 
 ### Local stdio — an agent with a shell
 
-`mcp_server.py` exposes the keychain as 34 MCP tools (`bardo_login`,
+`mcp_server.py` exposes the keychain as 37 MCP tools (`bardo_login`,
 `bardo_solve`, `bardo_sign`, `bardo_note_add`, `bardo_note_get`,
 `bardo_link_add`, `bardo_dashboard`, `bardo_policy_set`, … — full list with
 signatures in [TOOLS.md](TOOLS.md)). It's a thin client over the running Bardo

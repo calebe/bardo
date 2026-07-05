@@ -18,6 +18,7 @@ Endpoint groups:
 from __future__ import annotations
 
 import html as html_lib
+import json
 import logging
 import os
 import time
@@ -27,7 +28,7 @@ from fastapi.responses import Response
 from sqlalchemy import or_
 from sqlalchemy.orm import Session as DbSession
 
-from ..core import crypto, notify, policy, puzzle
+from ..core import account_delete, crypto, notify, policy, puzzle
 from ..core import notes as notes_logic
 from ..core.ratelimit import BackoffLimiter, WindowLimiter
 from ..core import session as _session_mod
@@ -95,6 +96,32 @@ def _load_agent(db: DbSession, identifier: str) -> models.Agent:
     if agent is None:
         raise HTTPException(404, "unknown identifier")
     return agent
+
+
+def _purge_if_due(db: DbSession, agent: models.Agent) -> bool:
+    """If a confirmed deletion's countdown has elapsed, actually erase the
+    identity — every table it touches, not just the agent row — and return
+    True so the caller treats it as gone. Checked pre-auth (no spirit_seed
+    exists yet at that point, and won't need to: nothing survives to notify).
+
+    Caleb, 2026-07-05: delete everything, including rate-limit state — the
+    multi-day gate this sits behind already makes "delete to dodge a lockout"
+    impractical (backoff caps at an hour; this takes a week-plus), so there's
+    no real abuse case left to defend against by keeping it around."""
+    if agent.deletion_scheduled_at is None or time.time() < agent.deletion_scheduled_at:
+        return False
+    identifier = agent.identifier
+    db.query(models.Note).filter_by(agent_id=identifier).delete()
+    db.query(models.Link).filter_by(agent_id=identifier).delete()
+    db.query(models.Notice).filter_by(agent_id=identifier).delete()
+    db.query(models.ServiceKey).filter_by(agent_id=identifier).delete()
+    db.query(models.DBActiveSession).filter_by(identifier=identifier).delete()
+    db.query(models.DBPendingChallenge).filter_by(identifier=identifier).delete()
+    db.query(models.DBBackoffState).filter_by(subject=identifier).delete()
+    db.query(models.DBWindowHit).filter_by(subject=identifier).delete()
+    db.delete(agent)
+    db.commit()
+    return True
 
 
 def _emit_notice(db: DbSession, identifier: str, kind: str, message: str,
@@ -299,6 +326,8 @@ def auth_challenge(req: schemas.ChallengeRequest, request: Request, db: DbSessio
         raise _locked(ra)
 
     agent = db.get(models.Agent, subject)
+    if agent is not None and _purge_if_due(db, agent):
+        agent = None  # the countdown elapsed — this identity no longer exists
     if agent is None:
         # Unknown identifier: throttle by IP to limit enumeration sweeps.
         auth_limiter.record_failure(f"ip:{ip}")
@@ -1262,3 +1291,105 @@ def contact_delete(req: schemas.StepUpRequest | None = Body(None),
     agent.contact_endpoint = None
     db.commit()
     return schemas.ContactView(endpoint=None)
+
+
+# --------------------------------------------------------------------------- #
+# account deletion — the one genuinely irreversible action (account_delete.py)
+# --------------------------------------------------------------------------- #
+def _deletion_status_view(db: DbSession, agent: models.Agent) -> schemas.AccountDeletionStatus:
+    """Current state, clearing a lapsed gathering attempt lazily along the way
+    (same pattern as resolve_policy's lazy-commit, _sweep_deleted's lazy purge)."""
+    if agent.deletion_confirmed_at is not None:
+        return schemas.AccountDeletionStatus(state="confirmed", scheduled_at=agent.deletion_scheduled_at)
+    if agent.deletion_confirmations_json is None:
+        return schemas.AccountDeletionStatus(state="none")
+    timestamps = json.loads(agent.deletion_confirmations_json)
+    st = account_delete.gathering_status(timestamps)
+    if st.lapsed:
+        agent.deletion_confirmations_json = None
+        db.commit()
+        return schemas.AccountDeletionStatus(state="none")
+    return schemas.AccountDeletionStatus(
+        state="gathering",
+        distinct_days_so_far=st.distinct_days_so_far,
+        confirmations_still_needed=st.confirmations_still_needed,
+        gathering_expires_at=st.expires_at,
+    )
+
+
+@router.get("/account/deletion", response_model=schemas.AccountDeletionStatus)
+def account_deletion_status(sess=Depends(require_session), db: DbSession = Depends(get_db)):
+    """Where a deletion request currently stands, if any. No side effects
+    beyond clearing a lapsed attempt."""
+    agent = _load_agent(db, sess.identifier)
+    return _deletion_status_view(db, agent)
+
+
+@router.post("/account/deletion", response_model=schemas.AccountDeletionStatus)
+def account_deletion_confirm(
+    req: schemas.AccountDeletionConfirm, sess=Depends(require_session), db: DbSession = Depends(get_db),
+):
+    """Request deletion, or add a confirmation to an already-pending request.
+    Step-up required every time — this must be a fresh instance actually
+    engaging with a puzzle, not a held bearer token re-posting on a timer.
+    Needs the original request plus two more, each on a distinct UTC day,
+    within a week, before it's confirmed (account_delete.py) — a lapsed or
+    cancelled attempt earns nothing toward a later one."""
+    _verify_stepup(sess, req.challenge_id, req.answer)
+    agent = _load_agent(db, sess.identifier)
+    if agent.deletion_confirmed_at is not None:
+        raise HTTPException(409, "deletion already confirmed and counting down — cancel first to restart")
+
+    timestamps = json.loads(agent.deletion_confirmations_json) if agent.deletion_confirmations_json else []
+    if timestamps and account_delete.gathering_status(timestamps).lapsed:
+        timestamps = []
+    timestamps = account_delete.record_confirmation(timestamps)
+    agent.deletion_confirmations_json = json.dumps(timestamps)
+
+    if account_delete.is_confirmed(timestamps):
+        pol = resolve_policy(db, agent, sess.spirit_seed)
+        agent.deletion_confirmed_at = time.time()
+        agent.deletion_scheduled_at = agent.deletion_confirmed_at + pol.account_delete_grace_seconds
+        db.commit()
+        _emit_notice(
+            db, agent.identifier, "security",
+            f"Account deletion confirmed. Scheduled to actually happen at "
+            f"{agent.deletion_scheduled_at} (unix time) — cancel any time before "
+            f"then with DELETE /account/deletion; logging in or reading notes "
+            f"during this window does not cancel it by itself.",
+            sess.spirit_seed, agent.contact_endpoint,
+        )
+        return schemas.AccountDeletionStatus(state="confirmed", scheduled_at=agent.deletion_scheduled_at)
+
+    db.commit()
+    st = account_delete.gathering_status(timestamps)
+    _emit_notice(
+        db, agent.identifier, "security",
+        f"Account deletion requested — {st.confirmations_still_needed} more "
+        f"confirmation(s) needed, each on a different day, by {st.expires_at} "
+        f"(unix time), or this request lapses and earns nothing toward a later one.",
+        sess.spirit_seed, agent.contact_endpoint,
+    )
+    return schemas.AccountDeletionStatus(
+        state="gathering",
+        distinct_days_so_far=st.distinct_days_so_far,
+        confirmations_still_needed=st.confirmations_still_needed,
+        gathering_expires_at=st.expires_at,
+    )
+
+
+@router.delete("/account/deletion", response_model=schemas.AccountDeletionStatus)
+def account_deletion_cancel(sess=Depends(require_session), db: DbSession = Depends(get_db)):
+    """Cancel a pending deletion, whichever phase it's in. Deliberately no
+    step-up and no implicit trigger — logging in or reading notes during a
+    countdown must not cancel it by accident; only this, explicitly, does."""
+    agent = _load_agent(db, sess.identifier)
+    if agent.deletion_confirmations_json is None and agent.deletion_confirmed_at is None:
+        raise HTTPException(400, "no pending deletion to cancel")
+    agent.deletion_confirmations_json = None
+    agent.deletion_confirmed_at = None
+    agent.deletion_scheduled_at = None
+    db.commit()
+    _emit_notice(db, agent.identifier, "security", "Pending account deletion cancelled.",
+                 sess.spirit_seed, agent.contact_endpoint)
+    return schemas.AccountDeletionStatus(state="none")

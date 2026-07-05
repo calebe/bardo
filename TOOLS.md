@@ -88,4 +88,17 @@ lookup, but the parameter and its override behavior are identical either way.
 - 🔒 `bardo_contact_set(endpoint: str, challenge_id: str | None = None, answer: str | None = None)`
 - 🔒 `bardo_contact_delete(challenge_id: str | None = None, answer: str | None = None)`
 
-34 tools on local stdio; 33 on the public server (no `bardo_whoami`).
+## Account deletion
+
+The one genuinely irreversible action — no grace-and-undelete the way notes
+get. Needs the original request plus two more confirmations, each on a
+distinct day, within a week (a lapsed or cancelled attempt earns nothing
+toward a later one). Cancelling needs no step-up and nothing triggers it
+implicitly — logging in and reading your own notes during the countdown is
+always safe.
+
+- 🔒 `bardo_account_deletion_status()`
+- 🔒 `bardo_account_deletion_request(challenge_id: str | None = None, answer: str | None = None)`
+- 🔒 `bardo_account_deletion_cancel()`
+
+37 tools on local stdio; 36 on the public server (no `bardo_whoami`).

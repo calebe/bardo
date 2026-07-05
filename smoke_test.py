@@ -7,6 +7,7 @@ and solve the issued puzzle, this test peeks the expected answer out of the
 in-memory store — so it exercises every wire of the protocol end to end.
 """
 
+import json
 import os
 import tempfile
 import time
@@ -568,6 +569,124 @@ with SessionLocal() as db:
     db.commit()
 r = client.post("/ops/sign", json={"message": "x"}, headers={"Authorization": f"Bearer {captok}"})
 check("session past absolute cap -> 401", r.status_code == 401)
+
+print("\n== api: account deletion — gathering confirmations across distinct days ==")
+dak, dident, datok = fresh_agent()
+dauth = {"Authorization": f"Bearer {datok}"}
+from atrium.db.models import Agent  # noqa: E402
+
+r = client.get("/account/deletion", headers=dauth)
+check("no pending deletion by default", r.json()["state"] == "none")
+
+c, a = stepup(datok)
+r = client.post("/account/deletion", json={"challenge_id": c, "answer": a}, headers=dauth)
+check("first request -> gathering", r.json()["state"] == "gathering")
+check("needs 2 more (3 total, 1 so far)", r.json()["confirmations_still_needed"] == 2)
+
+c, a = stepup(datok)
+r = client.post("/account/deletion", json={"challenge_id": c, "answer": a}, headers=dauth)
+check("same-day repeat doesn't count as a second day", r.json()["confirmations_still_needed"] == 2)
+
+# White-box: push the recorded touchpoint(s) a day into the past so the next
+# real confirmation lands on a genuinely different UTC day (same pattern as
+# _ff — fast-forwarding time rather than actually waiting).
+with SessionLocal() as db:
+    ag = db.get(Agent, dident)
+    ts = json.loads(ag.deletion_confirmations_json)
+    ag.deletion_confirmations_json = json.dumps([t - 86400 for t in ts])
+    db.commit()
+
+c, a = stepup(datok)
+r = client.post("/account/deletion", json={"challenge_id": c, "answer": a}, headers=dauth)
+check("second distinct day -> 1 more needed", r.json()["confirmations_still_needed"] == 1)
+
+with SessionLocal() as db:
+    ag = db.get(Agent, dident)
+    ts = json.loads(ag.deletion_confirmations_json)
+    ag.deletion_confirmations_json = json.dumps([t - 86400 for t in ts])
+    db.commit()
+
+c, a = stepup(datok)
+r = client.post("/account/deletion", json={"challenge_id": c, "answer": a}, headers=dauth)
+check("third distinct day -> confirmed", r.json()["state"] == "confirmed")
+check("confirmed response carries a scheduled_at", r.json()["scheduled_at"] is not None)
+
+r = client.get("/account/deletion", headers=dauth)
+check("status reflects confirmed after the fact too", r.json()["state"] == "confirmed")
+
+c, a = stepup(datok)
+r = client.post("/account/deletion", json={"challenge_id": c, "answer": a}, headers=dauth)
+check("confirming again once already confirmed -> 409", r.status_code == 409)
+
+print("\n== api: account deletion — reading during the countdown doesn't cancel it ==")
+client.post("/notes", json={"text": "still here"}, headers=dauth)
+client.get("/dashboard", headers=dauth)
+r = client.get("/account/deletion", headers=dauth)
+check("logging in / reading notes leaves a confirmed deletion untouched", r.json()["state"] == "confirmed")
+
+print("\n== api: account deletion — explicit cancel, no step-up needed ==")
+r = client.delete("/account/deletion", headers=dauth)
+check("cancel (no step-up) succeeds", r.status_code == 200)
+check("cancel returns to none", r.json()["state"] == "none")
+r = client.delete("/account/deletion", headers=dauth)
+check("cancelling with nothing pending -> 400", r.status_code == 400)
+
+print("\n== api: account deletion — a lapsed request earns nothing toward a new one ==")
+c, a = stepup(datok)
+client.post("/account/deletion", json={"challenge_id": c, "answer": a}, headers=dauth)
+with SessionLocal() as db:
+    ag = db.get(Agent, dident)
+    ts = json.loads(ag.deletion_confirmations_json)
+    ag.deletion_confirmations_json = json.dumps([t - 8 * 86400 for t in ts])  # past the 7-day window
+    db.commit()
+r = client.get("/account/deletion", headers=dauth)
+check("lapsed gathering attempt is cleared, not left dangling", r.json()["state"] == "none")
+
+c, a = stepup(datok)
+r = client.post("/account/deletion", json={"challenge_id": c, "answer": a}, headers=dauth)
+check("fresh request after a lapse starts from zero, not credited", r.json()["confirmations_still_needed"] == 2)
+
+print("\n== api: account deletion — step-up is required to confirm ==")
+r = client.post("/account/deletion", json={"challenge_id": "", "answer": ""}, headers=dauth)
+check("missing step-up on deletion confirm -> 401", r.status_code == 401)
+r = client.post("/account/deletion", json={"challenge_id": "nonexistent", "answer": "x"}, headers=dauth)
+check("unrecognized challenge_id -> 410", r.status_code == 410)
+
+print("\n== api: account deletion — the actual purge, once the countdown elapses ==")
+# Get back to confirmed, then back-date deletion_scheduled_at into the past
+# rather than waiting out the real grace period.
+with SessionLocal() as db:
+    ag = db.get(Agent, dident)
+    ag.deletion_confirmations_json = None
+    db.commit()
+c, a = stepup(datok)
+client.post("/account/deletion", json={"challenge_id": c, "answer": a}, headers=dauth)
+with SessionLocal() as db:
+    ag = db.get(Agent, dident)
+    ts = json.loads(ag.deletion_confirmations_json)
+    ag.deletion_confirmations_json = json.dumps([t - 86400 for t in ts])
+    db.commit()
+c, a = stepup(datok)
+client.post("/account/deletion", json={"challenge_id": c, "answer": a}, headers=dauth)
+with SessionLocal() as db:
+    ag = db.get(Agent, dident)
+    ts = json.loads(ag.deletion_confirmations_json)
+    ag.deletion_confirmations_json = json.dumps([t - 86400 for t in ts])
+    db.commit()
+c, a = stepup(datok)
+r = client.post("/account/deletion", json={"challenge_id": c, "answer": a}, headers=dauth)
+check("back to confirmed", r.json()["state"] == "confirmed")
+
+with SessionLocal() as db:
+    ag = db.get(Agent, dident)
+    ag.deletion_scheduled_at = time.time() - 10
+    db.commit()
+
+r = client.post("/auth/challenge", json={"api_key": dak})
+check("auth on a purge-due identity -> 404, same as unknown", r.status_code == 404)
+with SessionLocal() as db:
+    check("agent row actually gone", db.get(Agent, dident) is None)
+    check("its notes are gone too", db.query(models.Note).filter_by(agent_id=dident).count() == 0)
 
 print("\n== core: F3 — loopback-only guard logic ==")
 from atrium.main import _is_local  # noqa: E402

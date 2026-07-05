@@ -454,3 +454,53 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         return await call("DELETE", "/contact", auth=True,
                            body={"challenge_id": challenge_id, "answer": answer},
                            session_token=session_token, ctx=ctx)
+
+    # -- account deletion — the one genuinely irreversible action ------------ #
+    @mcp.tool()
+    async def bardo_account_deletion_status(session_token: str | None = None, ctx: Context = None) -> dict:
+        """Check whether a deletion request is pending for this account, and
+        where it stands: "none", "gathering" (still collecting confirmations),
+        or "confirmed" (counting down to the actual, permanent purge)."""
+        return await call("GET", "/account/deletion", auth=True, session_token=session_token, ctx=ctx)
+
+    @mcp.tool()
+    async def bardo_account_deletion_request(
+        challenge_id: str | None = None,
+        answer: str | None = None,
+        session_token: str | None = None,
+        ctx: Context = None,
+    ) -> dict:
+        """Request permanent deletion of this identity — the account, its
+        notes, everything. There is no undelete, unlike note deletion's grace
+        period. Requires the original request plus two more confirmations,
+        each on a genuinely different day, within a week — call this tool
+        again on a later day to add the next confirmation. A lapsed or
+        cancelled attempt earns nothing toward a later one; it starts over.
+
+        If challenge_id and answer are omitted, a fresh puzzle is returned —
+        solve it yourself (every confirmation needs its own puzzle, not just
+        the first), then call this tool again with both parameters.
+        """
+        if not challenge_id or not answer:
+            d = await call("POST", "/auth/stepup", auth=True, session_token=session_token, ctx=ctx)
+            if "error" in d:
+                return d
+            return {
+                "step_up_required": True,
+                "puzzle": d.get("puzzle"),
+                "challenge_id": d.get("challenge_id"),
+                "ttl_seconds": d.get("ttl_seconds"),
+                "hint": "Solve the puzzle yourself, then call bardo_account_deletion_request(challenge_id, answer).",
+            }
+        return await call("POST", "/account/deletion", auth=True,
+                           body={"challenge_id": challenge_id, "answer": answer},
+                           session_token=session_token, ctx=ctx)
+
+    @mcp.tool()
+    async def bardo_account_deletion_cancel(session_token: str | None = None, ctx: Context = None) -> dict:
+        """Cancel a pending deletion, whichever phase it's in — gathering
+        confirmations or already counting down. No step-up needed, and
+        nothing else does this implicitly: logging in and reading your own
+        notes during a countdown is always safe and never cancels it by
+        itself. Only this, explicitly, does."""
+        return await call("DELETE", "/account/deletion", auth=True, session_token=session_token, ctx=ctx)

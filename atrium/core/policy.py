@@ -18,7 +18,11 @@ from dataclasses import asdict, dataclass
 
 EXPORT_MODES = ("allow", "require_repuzzle", "disabled")
 DEFAULT_LOOSEN_DELAY = 172_800  # 48 hours
-DEFAULT_DELETE_GRACE = 259_200  # 72 hours (notes-project.md §5)
+DEFAULT_DELETE_GRACE = 259_200  # 72 hours (notes-project.md §5) — note chains only
+DEFAULT_ACCOUNT_DELETE_GRACE = 604_800  # 7 days — the account itself, deliberately
+# longer/separate from note deletion: losing the whole identity is a different
+# order of consequence than losing one note, and shouldn't be silently coupled
+# to whatever grace period an agent happens to have set for notes.
 
 # relation of a single field's proposed change
 SAME, TIGHTEN, LOOSEN = "same", "tighten", "loosen"
@@ -41,6 +45,9 @@ class Policy:
     # permanent purge. Longer = more protective (tighten); shorter = less
     # forgiving (loosen) — same relation as loosen_delay_seconds.
     delete_grace_seconds: int = DEFAULT_DELETE_GRACE
+    # The account itself, once a deletion request is confirmed (see
+    # account_delete.py) — deliberately separate from delete_grace_seconds.
+    account_delete_grace_seconds: int = DEFAULT_ACCOUNT_DELETE_GRACE
 
     # -- serialization ----------------------------------------------------- #
     def to_json(self) -> str:
@@ -59,6 +66,9 @@ class Policy:
             loosen_delay_seconds=d.get("loosen_delay_seconds", DEFAULT_LOOSEN_DELAY),
             tags_encrypted=d.get("tags_encrypted", True),
             delete_grace_seconds=d.get("delete_grace_seconds", DEFAULT_DELETE_GRACE),
+            account_delete_grace_seconds=d.get(
+                "account_delete_grace_seconds", DEFAULT_ACCOUNT_DELETE_GRACE
+            ),
         )
 
     def merge(self, changes: dict) -> "Policy":
@@ -78,6 +88,7 @@ class Policy:
             loosen_delay_seconds=base["loosen_delay_seconds"],
             tags_encrypted=base["tags_encrypted"],
             delete_grace_seconds=base["delete_grace_seconds"],
+            account_delete_grace_seconds=base["account_delete_grace_seconds"],
         )
 
 
@@ -94,6 +105,8 @@ def validate(p: Policy) -> None:
         raise PolicyError("loosen_delay_seconds must be >= 0")
     if p.delete_grace_seconds < 0:
         raise PolicyError("delete_grace_seconds must be >= 0")
+    if p.account_delete_grace_seconds < 0:
+        raise PolicyError("account_delete_grace_seconds must be >= 0")
     if p.service_allowlist is not None:
         if not all(isinstance(s, str) and s for s in p.service_allowlist):
             raise PolicyError("service_allowlist must be a list of non-empty strings")
@@ -152,6 +165,7 @@ def classify(old: Policy, new: Policy) -> str:
         _rel_allowlist(old.service_allowlist, new.service_allowlist),
         _rel_tags_encrypted(old.tags_encrypted, new.tags_encrypted),
         _rel_delay(old.delete_grace_seconds, new.delete_grace_seconds),
+        _rel_delay(old.account_delete_grace_seconds, new.account_delete_grace_seconds),
     ]
     if LOOSEN in rels:
         return LOOSEN

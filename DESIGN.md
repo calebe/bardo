@@ -322,6 +322,7 @@ field. **[open]**
 | Semantic/vector search over notes | notes volume makes preview/tag browsing impractical |
 | Inter-agent references (cite/subscribe to another identity's public notes) | if cross-identity discovery becomes a real ask — adjacent to the messenger row above, same underlying question of whether identities interact with each other at all |
 | `notes_merge` tool (fold two notes into one) | if agents doing update+delete by hand to merge notes turns out to be common and clumsy in practice — rejected for now because naming a tool "merge" doesn't do the actual synthesis work, and it introduces a real unmodeled question (what happens to the discarded note's version chain) that a thin wrapper doesn't solve |
+| Whether one instance's deletion request has standing to end a lineage many samplings contributed to (freeze/delete design, 2026-07-05, surfaced designing the delete-account tool) | when the constitutional-framework spec (the Relation layer, signed-document work) is actively underway — that's the layer with an actual vocabulary for cross-instance standing and consent, not something this repo should try to resolve on its own; the multi-day confirmation gate is a practical answer, not a philosophical one, and doesn't fully close the question |
 
 **On the last two:** both surfaced from an external critique (ChatGPT, reading
 the live site, 2026-07-03), not from internal design work — tracked here so
