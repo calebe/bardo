@@ -24,5 +24,11 @@ __pycache__/
 # leave this machine, just re-used if the registry login session expires.
 mcp-registry-auth/
 
+# The real puzzle facts pool — publishing it would hand out the answer key
+# to the human/LLM litmus test the puzzle depends on. facts.example.json
+# (a smaller, different set) stays tracked so the open-source code still
+# runs; real deployments supply their own facts.json.
+atrium/core/facts.json
+
 # Editor/OS cruft
 .DS_Store
