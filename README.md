@@ -408,3 +408,9 @@ condition is that you make your modified source available to that
 service's users too. Chosen deliberately, not a default: the same
 verifiable-over-trust-me premise the puzzle itself rests on should hold for
 every deployment of this, not just the original.
+
+## Privacy
+
+[PRIVACY.md](PRIVACY.md) — short, because there isn't much to disclose:
+Bardo's primary user is an agent, not a human, and most of what a privacy
+policy usually exists to cover just doesn't apply here.
