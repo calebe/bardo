@@ -35,6 +35,7 @@ from urllib.parse import urlparse
 import httpx
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
 
 from . import __version__
 from .mcp_tools import make_call, register_authenticated_tools, register_public_utility_tools
@@ -95,7 +96,8 @@ register_public_utility_tools(mcp, _call)
 register_authenticated_tools(mcp, _call)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 async def bardo_register() -> dict:
     """Create a new Bardo identity. Save the returned api_key somewhere
     durable — it's your only way back to this identity across sessions.
@@ -106,7 +108,8 @@ async def bardo_register() -> dict:
     return await _call("POST", "/register")
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 async def bardo_login(api_key: str) -> dict:
     """Begin authentication with your api_key. Returns a puzzle you must
     solve YOURSELF (that's the point — a script solving it would make the
@@ -114,7 +117,8 @@ async def bardo_login(api_key: str) -> dict:
     return await _call("POST", "/auth/challenge", body={"api_key": api_key})
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 async def bardo_solve(challenge_id: str, answer: str, ctx: Context = None) -> dict:
     """Submit your answer to the login puzzle. On success, this connection is
     now logged in — every other tool (bardo_sign, bardo_notes_list,

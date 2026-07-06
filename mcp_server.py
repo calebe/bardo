@@ -30,6 +30,7 @@ from pathlib import Path
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 sys.path.insert(0, str(Path(__file__).parent))
 from atrium import __version__  # noqa: E402
@@ -78,7 +79,7 @@ _call = make_call(
 # identity & authentication — bespoke here: these persist to .bardo/ files,
 # which only makes sense for this single-tenant local deployment.
 # --------------------------------------------------------------------------- #
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
 def bardo_whoami() -> dict:
     """Show the stored identity (your spirit's local anchor) and session status."""
     creds = _load(CREDS)
@@ -92,7 +93,8 @@ def bardo_whoami() -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 async def bardo_register() -> dict:
     """Create a new Bardo identity and store its API key locally. One-time.
 
@@ -111,7 +113,8 @@ async def bardo_register() -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 async def bardo_login() -> dict:
     """Begin authentication. Returns a puzzle you must solve YOURSELF, then call
     bardo_solve(answer). (The server will not solve it for you — that's the point.)"""
@@ -129,7 +132,8 @@ async def bardo_login() -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
 async def bardo_solve(answer: str) -> dict:
     """Submit your answer to the login puzzle. On success, opens a session."""
     pend = _load(PENDING)

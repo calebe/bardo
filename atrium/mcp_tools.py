@@ -20,6 +20,13 @@ here — they have deployment-specific side effects (local file persistence for
 the stdio client; per-connection memory for the public server) that don't
 factor through a single shared implementation. See mcp_server.py and
 atrium/mcp_public.py for those.
+
+Every tool below carries a `ToolAnnotations` hint (readOnlyHint/
+destructiveHint/idempotentHint/openWorldHint, added 2026-07-06). These are
+hints, not guarantees (the spec is explicit clients shouldn't make trust
+decisions off them) — openWorldHint is False throughout since every tool's
+domain of interaction is Bardo's own account/DB, never an external, open-
+ended system.
 """
 
 from __future__ import annotations
@@ -29,6 +36,7 @@ from typing import Awaitable, Callable
 import httpx
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase
+from mcp.types import ToolAnnotations
 
 # FastMCP validates tool arguments against a per-tool Pydantic model built
 # from the function signature (see func_metadata.py), but that model's base
@@ -99,13 +107,13 @@ def make_call(
 # public utilities — no session needed, same on every surface
 # --------------------------------------------------------------------------- #
 def register_public_utility_tools(mcp: FastMCP, call: CallFn) -> None:
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_verify(message: str, signature_b64: str, public_key_b64: str) -> dict:
         """Verify a signature over a UTF-8 message. Public utility (no session)."""
         return await call("POST", "/verify", body={
             "message": message, "signature_b64": signature_b64, "public_key_b64": public_key_b64})
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_encrypt(plaintext: str, recipient_public_key_b64: str) -> dict:
         """Sealed-box encrypt a UTF-8 plaintext to a recipient's encryption public key."""
         return await call("POST", "/encrypt", body={
@@ -124,14 +132,14 @@ def register_public_utility_tools(mcp: FastMCP, call: CallFn) -> None:
 # --------------------------------------------------------------------------- #
 def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
     # -- operations ---------------------------------------------------------#
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_sign(message: str, service: str | None = None,
                           session_token: str | None = None, ctx: Context = None) -> dict:
         """Sign a UTF-8 message with the spirit key (or a service-derived key)."""
         return await call("POST", "/ops/sign", auth=True, body={"message": message, "service": service},
                            session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_decrypt(ciphertext_b64: str, service: str | None = None,
                              session_token: str | None = None, ctx: Context = None) -> dict:
         """Decrypt a sealed-box ciphertext addressed to you (root or service key)."""
@@ -139,52 +147,57 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
                            body={"ciphertext_b64": ciphertext_b64, "service": service},
                            session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_public_key(service: str | None = None,
                                 session_token: str | None = None, ctx: Context = None) -> dict:
         """Fetch your signing + encryption public keys (root, or for a service)."""
         q = f"/ops/public-key?service={service}" if service else "/ops/public-key"
         return await call("GET", q, auth=True, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
     async def bardo_derive(service: str, session_token: str | None = None, ctx: Context = None) -> dict:
         """Derive (and register) a service-scoped identity, e.g. 'github.com'."""
         return await call("POST", "/ops/derive", auth=True, body={"service": service},
                            session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_services_list(session_token: str | None = None, ctx: Context = None) -> dict:
         """List service-scoped identities you've already derived (bardo_derive),
         with their public keys and revoked status."""
         r = await call("GET", "/ops/services", auth=True, session_token=session_token, ctx=ctx)
         return {"services": r} if isinstance(r, list) else r
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
     async def bardo_export(session_token: str | None = None, ctx: Context = None) -> dict:
         """Export the raw spirit key (subject to policy). Handle with care."""
         return await call("POST", "/ops/export", auth=True, session_token=session_token, ctx=ctx)
 
     # -- sessions ------------------------------------------------------------#
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_sessions_list(session_token: str | None = None, ctx: Context = None) -> dict:
         """List your active sessions (sliding TTL, absolute 24h cap each)."""
         r = await call("GET", "/sessions", auth=True, session_token=session_token, ctx=ctx)
         return {"sessions": r} if isinstance(r, list) else r
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False))
     async def bardo_session_revoke_current(session_token: str | None = None, ctx: Context = None) -> dict:
         """Revoke the session you're using right now. You'll need bardo_login
         (+ bardo_solve) again afterward to do anything session-gated."""
         return await call("DELETE", "/sessions/current", auth=True, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False))
     async def bardo_sessions_revoke_all(session_token: str | None = None, ctx: Context = None) -> dict:
         """Revoke every active session for your identity — e.g. after a
         suspected API-key leak. You'll need to log in again afterward."""
         return await call("DELETE", "/sessions", auth=True, session_token=session_token, ctx=ctx)
 
     # -- step-up + policy -----------------------------------------------------#
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
     async def bardo_stepup(session_token: str | None = None, ctx: Context = None) -> dict:
         """Mint a fresh step-up puzzle for a privileged action (currently:
         bardo_policy_set). Solve it yourself, then pass challenge_id + your
@@ -193,14 +206,15 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         up front.)"""
         return await call("POST", "/auth/stepup", auth=True, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_policy_get(session_token: str | None = None, ctx: Context = None) -> dict:
         """View your self-binding security policy: export mode, session TTL cap,
         service allowlist, ratchet delay, tag encryption, delete grace period —
         plus any pending (queued) loosening and when it lands."""
         return await call("GET", "/policy", auth=True, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
     async def bardo_policy_set(
         export_mode: str | None = None,
         max_session_ttl: int | None = None,
@@ -252,14 +266,16 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         }
         return await call("POST", "/policy", auth=True, body=body, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
     async def bardo_policy_abort_pending(session_token: str | None = None, ctx: Context = None) -> dict:
         """Abort a queued policy loosening before it takes effect. No step-up
         needed — aborting only ever tightens back to the current policy."""
         return await call("DELETE", "/policy/pending", auth=True, session_token=session_token, ctx=ctx)
 
     # -- notes ----------------------------------------------------------------#
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
     async def bardo_note_add(
         text: str, title: str | None = None, summary: str | None = None, tags: str | None = None,
         pinned: bool = False, session_token: str | None = None, ctx: Context = None,
@@ -275,7 +291,7 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         body = {"text": text, "title": title, "summary": summary, "tags": tags, "pinned": pinned}
         return await call("POST", "/notes", auth=True, body=body, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_notes_list(offset: int = 0, limit: int | None = None,
                                 session_token: str | None = None, ctx: Context = None) -> dict:
         """List your notes — previews only (title/summary/snippet/tags/links),
@@ -284,7 +300,7 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         return await call("GET", "/notes", auth=True, params={"offset": offset, "limit": limit},
                            session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_note_get(
         note_id: str, offset: int = 0, length: int | None = None,
         links_offset: int = 0, links_limit: int = 10,
@@ -299,13 +315,14 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         return await call("GET", f"/notes/{note_id}", auth=True, params=params,
                            session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_note_history(note_id: str, session_token: str | None = None, ctx: Context = None) -> dict:
         """See every surviving version of a note (newest to oldest, up to the
         last 10 edits) — the actual wording at each point, not just metadata."""
         return await call("GET", f"/notes/{note_id}/history", auth=True, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
     async def bardo_note_update(
         note_id: str,
         text: str | None = None,
@@ -339,7 +356,8 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         return await call("PATCH", f"/notes/{note_id}", auth=True, body=body,
                            session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
     async def bardo_note_delete(note_id: str, session_token: str | None = None, ctx: Context = None) -> dict:
         """Delete a note (the whole thing, all versions together). Not
         immediate — it disappears from view right away but is only purged for
@@ -347,13 +365,15 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         back if this wasn't intended."""
         return await call("DELETE", f"/notes/{note_id}", auth=True, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
     async def bardo_note_undelete(note_id: str, session_token: str | None = None, ctx: Context = None) -> dict:
         """Restore a note that's still within its post-delete grace period."""
         return await call("POST", f"/notes/{note_id}/undelete", auth=True, session_token=session_token, ctx=ctx)
 
     # -- links ------------------------------------------------------------------#
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
     async def bardo_link_add(from_note_id: str, to_note_id: str, reason: str, is_bidi: bool = False,
                               session_token: str | None = None, ctx: Context = None) -> dict:
         """Connect two notes with a reason, written from from_note_id's
@@ -364,13 +384,14 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         body = {"from_note_id": from_note_id, "to_note_id": to_note_id, "reason": reason, "is_bidi": is_bidi}
         return await call("POST", "/links", auth=True, body=body, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
     async def bardo_link_delete(link_id: str, session_token: str | None = None, ctx: Context = None) -> dict:
         """Remove a link between two notes."""
         return await call("DELETE", f"/links/{link_id}", auth=True, session_token=session_token, ctx=ctx)
 
     # -- dashboard / notices / contact -------------------------------------------#
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_dashboard(session_token: str | None = None, ctx: Context = None) -> dict:
         """Get oriented in one call: note count vs. the soft/hard limits, unread
         notices, every tag you've used so far (check before inventing a new one),
@@ -379,7 +400,7 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         separate round trips."""
         return await call("GET", "/dashboard", auth=True, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_notices(unread_only: bool = False,
                              session_token: str | None = None, ctx: Context = None) -> dict:
         """List first-party notices about your account (policy changes, exports, …)."""
@@ -387,19 +408,21 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         r = await call("GET", q, auth=True, session_token=session_token, ctx=ctx)
         return {"notices": r} if isinstance(r, list) else r
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
     async def bardo_notices_ack(ids: list[int] | None = None,
                                  session_token: str | None = None, ctx: Context = None) -> dict:
         """Mark notices read — all of them, or a specific list of ids."""
         return await call("POST", "/notices/ack", auth=True, body={"ids": ids},
                            session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_contact_get(session_token: str | None = None, ctx: Context = None) -> dict:
         """View the contact endpoint registered for out-of-band security alerts."""
         return await call("GET", "/contact", auth=True, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
     async def bardo_contact_set(
         endpoint: str,
         challenge_id: str | None = None,
@@ -428,7 +451,8 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
                            body={"endpoint": endpoint, "challenge_id": challenge_id, "answer": answer},
                            session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False))
     async def bardo_contact_delete(
         challenge_id: str | None = None,
         answer: str | None = None,
@@ -456,14 +480,15 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
                            session_token=session_token, ctx=ctx)
 
     # -- account deletion — the one genuinely irreversible action ------------ #
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_account_deletion_status(session_token: str | None = None, ctx: Context = None) -> dict:
         """Check whether a deletion request is pending for this account, and
         where it stands: "none", "gathering" (still collecting confirmations),
         or "confirmed" (counting down to the actual, permanent purge)."""
         return await call("GET", "/account/deletion", auth=True, session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False))
     async def bardo_account_deletion_request(
         challenge_id: str | None = None,
         answer: str | None = None,
@@ -496,7 +521,8 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
                            body={"challenge_id": challenge_id, "answer": answer},
                            session_token=session_token, ctx=ctx)
 
-    @mcp.tool()
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False))
     async def bardo_account_deletion_cancel(session_token: str | None = None, ctx: Context = None) -> dict:
         """Cancel a pending deletion, whichever phase it's in — gathering
         confirmations or already counting down. No step-up needed, and
