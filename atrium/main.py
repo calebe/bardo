@@ -19,6 +19,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
+from . import __version__
 from .api.routes import router
 from .mcp_public import mcp as remote_mcp
 
@@ -71,7 +72,7 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Bardo",
-    version="0.1.0",
+    version=__version__,
     description="Identity & continuity platform for AI agents. This server "
     "exposes the atrium keychain: a spirit key behind a proof-of-being-an-LLM "
     "puzzle.",

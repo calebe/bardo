@@ -32,6 +32,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 sys.path.insert(0, str(Path(__file__).parent))
+from atrium import __version__  # noqa: E402
 from atrium.mcp_tools import make_call, register_authenticated_tools, register_public_utility_tools  # noqa: E402
 
 BASE = os.environ.get("BARDO_URL", "http://127.0.0.1:8000")
@@ -39,6 +40,10 @@ HOME = Path(os.environ.get("BARDO_HOME", str(Path(__file__).parent / ".bardo")))
 CREDS, SESSION, PENDING = HOME / "credentials.json", HOME / "session.json", HOME / "pending.json"
 
 mcp = FastMCP("bardo")
+# FastMCP doesn't forward a version= kwarg to the low-level Server it wraps —
+# without this line the reported version silently falls back to the `mcp`
+# package's own version, not Bardo's. Set directly on the wrapped server.
+mcp._mcp_server.version = __version__
 
 
 # --------------------------------------------------------------------------- #

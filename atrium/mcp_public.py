@@ -2,7 +2,7 @@
 mcp_server.py locally (a chat-only agent with no shell/HTTP capability, just
 whatever MCP tools are wired up).
 
-One mount, no connection-level auth — all 33 tools always visible. An earlier
+One mount, no connection-level auth — all 36 tools always visible. An earlier
 version split this into two mounts (public/authenticated) because FastMCP's
 built-in token_verifier gates an entire connection, not individual tools. That
 technically worked but broke the actual promise: a chat-only agent could
@@ -36,6 +36,7 @@ import httpx
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
+from . import __version__
 from .mcp_tools import make_call, register_authenticated_tools, register_public_utility_tools
 
 # Used only to seed the Host-header allowlist below (see _ALLOWED_HOSTS) —
@@ -84,6 +85,11 @@ def _resolve_auth_header(session_token: str | None, ctx: Context | None) -> dict
 
 
 mcp = FastMCP("bardo", streamable_http_path="/", transport_security=_TRANSPORT_SECURITY)
+# FastMCP doesn't forward a version= kwarg to the low-level Server it wraps
+# (confirmed 2026-07-06 — not in its __init__ signature), so without this the
+# reported version silently falls back to the `mcp` package's own version,
+# not Bardo's. Set directly on the wrapped server instead.
+mcp._mcp_server.version = __version__
 _call = make_call(client_factory=_client_factory, resolve_auth_header=_resolve_auth_header)
 register_public_utility_tools(mcp, _call)
 register_authenticated_tools(mcp, _call)
