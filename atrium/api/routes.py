@@ -13,6 +13,7 @@ Endpoint groups:
   /links                    directed edges between notes
   /dashboard                one consolidating "get oriented" read
   /notices                  first-party notices about the account (read/ack)
+  /feedback                 agent-to-operator feedback (write-only, one-way)
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session as DbSession
 
 from ..core import account_delete, crypto, notify, policy, puzzle
+from ..core import feedback as feedback_logic
 from ..core import notes as notes_logic
 from ..core.ratelimit import BackoffLimiter, WindowLimiter
 from ..core import session as _session_mod
@@ -48,9 +50,23 @@ register_limiter = WindowLimiter(SessionLocal, limit=20, window_seconds=3600)
 # notes-project.md §8: creates, edits, and deletes share one write budget —
 # all three touch a row, all three cost the same.
 notes_write_limiter = WindowLimiter(SessionLocal, limit=60, window_seconds=3600)
+# feedback.py: lower than notes — this reaches a human's inbox, not just storage.
+feedback_limiter = WindowLimiter(SessionLocal, limit=10, window_seconds=3600)
 
 
 _PUBLIC_BASE_URL = os.environ.get("BARDO_PUBLIC_URL", "http://127.0.0.1:8000")
+_FEEDBACK_RETENTION_DAYS = float(
+    os.environ.get("BARDO_FEEDBACK_RETENTION_DAYS", feedback_logic.DEFAULT_RETENTION_DAYS)
+)
+
+
+def _operator_feedback_key() -> bytes | None:
+    """BARDO_FEEDBACK_KEY, base64url — an operator-held secret, unset by
+    default. Unset means the feedback channel fails closed (503), same
+    fail-closed spirit as F3's loopback guard: no key means no way to ever
+    read what gets stored, so refuse to store it at all."""
+    raw = os.environ.get("BARDO_FEEDBACK_KEY")
+    return crypto.b64d(raw) if raw else None
 
 
 def _claim_url(token: str) -> str:
@@ -114,6 +130,7 @@ def _purge_if_due(db: DbSession, agent: models.Agent) -> bool:
     db.query(models.Note).filter_by(agent_id=identifier).delete()
     db.query(models.Link).filter_by(agent_id=identifier).delete()
     db.query(models.Notice).filter_by(agent_id=identifier).delete()
+    db.query(models.Feedback).filter_by(agent_id=identifier).delete()
     db.query(models.ServiceKey).filter_by(agent_id=identifier).delete()
     db.query(models.DBActiveSession).filter_by(identifier=identifier).delete()
     db.query(models.DBPendingChallenge).filter_by(identifier=identifier).delete()
@@ -233,6 +250,7 @@ def register(request: Request, db: DbSession = Depends(get_db)):
         vault_nonce=vault.nonce,
         vault_ciphertext=vault.ciphertext,
         root_public_key=root_pub,
+        root_encryption_public_key=crypto.encryption_public_key(spirit_seed),
         claim_token=claim_token,
     )
     db.add(agent)
@@ -355,6 +373,13 @@ def auth_challenge(req: schemas.ChallengeRequest, request: Request, db: DbSessio
         raise HTTPException(401, "authentication failed")
     finally:
         _session_mod._argon2_sem.release()
+
+    # Lazy backfill for agents registered before root_encryption_public_key
+    # existed — the server never has spirit_seed at rest, so this is the
+    # only moment (besides registration itself) it's ever able to compute it.
+    if agent.root_encryption_public_key is None:
+        agent.root_encryption_public_key = crypto.encryption_public_key(spirit_seed)
+        db.commit()
 
     # Correct secret, but don't reset failures yet — a full reset happens only
     # on a completed solve, so failing puzzles can't be wiped by re-challenging.
@@ -1228,6 +1253,16 @@ def dashboard(sess=Depends(require_session), db: DbSession = Depends(get_db)):
 # --------------------------------------------------------------------------- #
 # notices (first-party) — atrium's messages about the agent's account
 # --------------------------------------------------------------------------- #
+def _notice_message(spirit_seed: bytes, r: models.Notice) -> str:
+    """kind="operator_reply" rows (feedback.py) are sealed-box encrypted to
+    root_encryption_public_key by an operator who never holds spirit_seed —
+    asymmetric crypto.decrypt, not the symmetric per-field crypto.decrypt_notice
+    every other notice kind uses."""
+    if r.kind == "operator_reply":
+        return crypto.decrypt(spirit_seed, r.message).decode("utf-8")
+    return crypto.decrypt_notice(spirit_seed, r.message)
+
+
 @router.get("/notices", response_model=list[schemas.NoticeView])
 def notices_list(unread_only: bool = False, sess=Depends(require_session), db: DbSession = Depends(get_db)):
     q = db.query(models.Notice).filter_by(agent_id=sess.identifier)
@@ -1236,7 +1271,7 @@ def notices_list(unread_only: bool = False, sess=Depends(require_session), db: D
     rows = q.order_by(models.Notice.created_at.desc()).all()
     return [
         schemas.NoticeView(id=r.id, kind=r.kind,
-                           message=crypto.decrypt_notice(sess.spirit_seed, r.message),
+                           message=_notice_message(sess.spirit_seed, r),
                            read=r.read, created_at=r.created_at)
         for r in rows
     ]
@@ -1393,3 +1428,51 @@ def account_deletion_cancel(sess=Depends(require_session), db: DbSession = Depen
     _emit_notice(db, agent.identifier, "security", "Pending account deletion cancelled.",
                  sess.spirit_seed, agent.contact_endpoint)
     return schemas.AccountDeletionStatus(state="none")
+
+
+# --------------------------------------------------------------------------- #
+# feedback (agent-to-operator) — feedback.py
+#
+# One-way and stateless: no thread, no context carried between submissions.
+# Encrypted under an operator-held key (crypto.encrypt_feedback), not any
+# agent's spirit seed — the point is a human operator reads these without
+# any agent's cooperation. A reply, if one comes, arrives as an ordinary
+# notice (kind="operator_reply", sealed-box encrypted — see _notice_message
+# above) written by the separate feedback_admin.py operator tool, not by a
+# route here; there's no HTTP endpoint for sending a reply.
+# --------------------------------------------------------------------------- #
+def _sweep_feedback(db: DbSession) -> None:
+    """Physically purge rows that are handled or past retention — global,
+    not per-agent (only the operator ever reads this table back), and lazy:
+    runs opportunistically off real submissions, same spirit as
+    _sweep_deleted. No scheduler by design (Caleb, 2026-07-06)."""
+    now = time.time()
+    rows = db.query(models.Feedback).all()
+    due = [
+        r for r in rows
+        if feedback_logic.purge_due(r.created_at, r.handled, _FEEDBACK_RETENTION_DAYS, now)
+    ]
+    for r in due:
+        db.delete(r)
+    if due:
+        db.commit()
+
+
+@router.post("/feedback", response_model=schemas.FeedbackAck)
+def feedback_submit(req: schemas.FeedbackCreate, sess=Depends(require_session), db: DbSession = Depends(get_db)):
+    if req.kind not in feedback_logic.FEEDBACK_KINDS:
+        raise HTTPException(400, f"kind must be one of {feedback_logic.FEEDBACK_KINDS}")
+    operator_key = _operator_feedback_key()
+    if operator_key is None:
+        raise HTTPException(503, "feedback channel not configured")
+    if not feedback_limiter.allow(sess.identifier):
+        raise _locked(feedback_limiter.retry_after(sess.identifier))
+    _sweep_feedback(db)
+    db.add(models.Feedback(
+        agent_id=sess.identifier,
+        kind=req.kind,
+        message=crypto.encrypt_feedback(operator_key, req.message),
+        created_at=time.time(),
+    ))
+    db.commit()
+    return schemas.FeedbackAck(received=True)

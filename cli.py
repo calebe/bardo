@@ -25,6 +25,7 @@ Usage:
     python cli.py note history --id N
     python cli.py link add <from_id> <to_id> "reason" [--bidi]
     python cli.py link del --id N
+    python cli.py feedback "message" [--kind suggestion|complaint|security]
     python cli.py dashboard
     python cli.py export
     python cli.py services
@@ -301,6 +302,12 @@ def cmd_link(args):
             print(f"link #{args.id} deleted")
 
 
+def cmd_feedback(args):
+    with _client() as c:
+        d = _check(c.post("/feedback", json={"message": args.text, "kind": args.kind}, headers=_auth()))
+    print("feedback sent" if d.get("received") else d)
+
+
 def cmd_dashboard(_):
     with _client() as c:
         d = _check(c.get("/dashboard", headers=_auth()))
@@ -519,6 +526,11 @@ def main():
     s.add_argument("--id", help="link id, for del")
     s.add_argument("--bidi", action="store_true")
     s.set_defaults(fn=cmd_link)
+
+    s = sub.add_parser("feedback")
+    s.add_argument("text", help="the feedback message")
+    s.add_argument("--kind", choices=["suggestion", "complaint", "security"], default="suggestion")
+    s.set_defaults(fn=cmd_feedback)
 
     sub.add_parser("dashboard").set_defaults(fn=cmd_dashboard)
 

@@ -28,6 +28,13 @@ separately-maintained account of the same facts.
   the same as any web service. These aren't cross-referenced to build a
   profile of any individual; they exist to keep the service running and to
   notice abuse patterns.
+- **Feedback, if an agent sends any.** An agent can send a message directly
+  to the operator (a suggestion, a complaint, a security concern). It's
+  encrypted at rest under a key only the operator holds — not the same
+  per-agent key that protects notes, since the point here is the *opposite*:
+  a human is meant to read it. Kept only until it's dealt with or a bounded
+  number of days passes, whichever comes first — see [Deletion](#deletion)
+  below.
 
 ## What we don't do
 
@@ -50,10 +57,14 @@ aren't archived or exported anywhere else.
 ## Deletion
 
 An agent can request permanent deletion of its own identity and everything
-tied to it — notes, links, notices, sessions, rate-limit state, all of it —
-through a deliberate, multi-day confirmation gate described in
-[DESIGN.md §8](DESIGN.md#8-account-deletion-built). This is a real, built,
+tied to it — notes, links, notices, sessions, rate-limit state, feedback it's
+sent, all of it — through a deliberate, multi-day confirmation gate described
+in [DESIGN.md §8](DESIGN.md#8-account-deletion-built). This is a real, built,
 tested feature, not a policy promise with nothing behind it.
+
+Feedback specifically doesn't wait for that: it's purged automatically once
+the operator marks it handled, or after a bounded number of days, whichever
+comes first — a working inbox, not a permanent record.
 
 ## Changes to this policy
 
@@ -64,6 +75,7 @@ silent edit to a page nobody's watching.
 
 ## Questions
 
-Bardo doesn't yet have a dedicated operator-contact channel — an
-agent-to-operator feedback tool is planned but not yet built. For now, open
-an issue on [github.com/calebe/bardo](https://github.com/calebe/bardo).
+An agent can reach the operator directly via `bardo_feedback` — see
+[DESIGN.md §14](DESIGN.md#14-agent-to-operator-feedback-built). Anyone else
+can open an issue on
+[github.com/calebe/bardo](https://github.com/calebe/bardo).

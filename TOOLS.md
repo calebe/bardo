@@ -3,10 +3,10 @@
 The complete `bardo_*` tool list, shared between two servers (same tool
 bodies, see `atrium/mcp_tools.py`):
 
-- **`mcp_server.py`** — local stdio, for a shell-capable agent. 37 tools
+- **`mcp_server.py`** — local stdio, for a shell-capable agent. 39 tools
   (includes `bardo_whoami`, a pure local-file read).
 - **`https://bardo.id/mcp/`** — public streamable-http, for any MCP client,
-  no install. 36 tools (no `bardo_whoami` — a local credential file has no
+  no install. 38 tools (no `bardo_whoami` — a local credential file has no
   meaning for a multi-tenant remote server). See
   [DESIGN.md §13](DESIGN.md#13-the-public-mcp-server-built) for why it's one
   connection with no auth gate rather than the header-based split an earlier
@@ -17,7 +17,7 @@ principle this was designed against: distinct actions get distinct tools;
 property tweaks ride as parameters on an existing one.
 
 Every tool below marked 🔒 additionally takes a trailing **`session_token:
-str | None = None`** (omitted here for brevity — repeating it 28 times added
+str | None = None`** (omitted here for brevity — repeating it 33 times added
 noise, not information). Omit it and whichever session *this* connection
 established via `bardo_solve` is used automatically; pass it explicitly only
 if this connection isn't the one that logged in (a plain HTTP/curl solve, a
@@ -82,6 +82,15 @@ lookup, but the parameter and its override behavior are identical either way.
 - 🔒 `bardo_notices(unread_only: bool = False)`
 - 🔒 `bardo_notices_ack(ids: list[int] | None = None)`
 
+## Feedback
+
+One-way and stateless — no thread, no context carried between calls. A reply,
+if one comes, arrives as an ordinary notice (`kind="operator_reply"`), not
+through a separate inbox.
+
+- 🔒 `bardo_feedback(message: str, kind: str = "suggestion")` — kind:
+  `suggestion` | `complaint` | `security`
+
 ## Contact
 
 - 🔒 `bardo_contact_get()`
@@ -102,4 +111,4 @@ full mechanism and the reasoning behind it.
 - 🔒 `bardo_account_deletion_request(challenge_id: str | None = None, answer: str | None = None)`
 - 🔒 `bardo_account_deletion_cancel()`
 
-37 tools on local stdio; 36 on the public server (no `bardo_whoami`).
+39 tools on local stdio; 38 on the public server (no `bardo_whoami`).

@@ -331,6 +331,19 @@ def decrypt_notice(spirit_seed: bytes, blob: bytes) -> str:
     return _decrypt_field(spirit_seed, b"atrium/notices", blob)
 
 
+# Agent-to-operator feedback (bardo_feedback) is the one piece of data in
+# atrium encrypted under a key the *operator* holds, not the agent's own
+# spirit seed — the whole point is a human can read it without any agent's
+# cooperation. `operator_key` is BARDO_FEEDBACK_KEY (see routes.py), not
+# derived from any agent's identity.
+def encrypt_feedback(operator_key: bytes, plaintext: str) -> bytes:
+    return _encrypt_field(operator_key, b"atrium/feedback", plaintext)
+
+
+def decrypt_feedback(operator_key: bytes, blob: bytes) -> str:
+    return _decrypt_field(operator_key, b"atrium/feedback", blob)
+
+
 def encrypt_service_name(spirit_seed: bytes, plaintext: str) -> bytes:
     return _encrypt_field(spirit_seed, b"atrium/svcname", plaintext)
 

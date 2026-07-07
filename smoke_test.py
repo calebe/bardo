@@ -688,6 +688,116 @@ with SessionLocal() as db:
     check("agent row actually gone", db.get(Agent, dident) is None)
     check("its notes are gone too", db.query(models.Note).filter_by(agent_id=dident).count() == 0)
 
+print("\n== api: feedback — fails closed with no operator key configured ==")
+os.environ.pop("BARDO_FEEDBACK_KEY", None)
+fak, fident, ftok = fresh_agent()
+fauth = {"Authorization": f"Bearer {ftok}"}
+r = client.post("/feedback", json={"message": "no key yet"}, headers=fauth)
+check("no BARDO_FEEDBACK_KEY -> 503", r.status_code == 503)
+
+print("\n== api: feedback — submit, validate kind, rate limit ==")
+os.environ["BARDO_FEEDBACK_KEY"] = crypto.b64e(os.urandom(32))
+r = client.post("/feedback", json={"message": "bad kind", "kind": "nonsense"}, headers=fauth)
+check("unknown kind -> 400", r.status_code == 400)
+
+r = client.post("/feedback", json={"message": "a suggestion", "kind": "suggestion"}, headers=fauth)
+check("valid submission -> received", r.status_code == 200 and r.json()["received"] is True)
+
+r = client.post("/feedback", json={"message": "default kind"}, headers=fauth)
+check("kind defaults to suggestion", r.status_code == 200)
+
+for _ in range(8):  # 2 already sent above; limit is 10/hour
+    client.post("/feedback", json={"message": "filler"}, headers=fauth)
+r = client.post("/feedback", json={"message": "one too many"}, headers=fauth)
+check("11th submission in the window -> 429", r.status_code == 429)
+
+print("\n== core: feedback — encrypted under the operator key, not any spirit seed ==")
+with SessionLocal() as db:
+    rows = db.query(models.Feedback).filter_by(agent_id=fident).all()
+    check("feedback rows were actually persisted", len(rows) > 0)
+    op_key = crypto.b64d(os.environ["BARDO_FEEDBACK_KEY"])
+    plain = crypto.decrypt_feedback(op_key, rows[0].message)
+    check("operator key decrypts the stored message", plain in ("a suggestion", "default kind", "filler"))
+    bad = True
+    try:
+        crypto.decrypt_feedback(crypto.b64d(crypto.b64e(os.urandom(32))), rows[0].message)
+        bad = False
+    except ValueError:
+        bad = True
+    check("wrong operator key fails to decrypt", bad)
+
+print("\n== api: feedback — retention sweep (handled, and past-retention) purge lazily ==")
+# Fresh agent from here on — fident already spent its whole rate-limit budget above.
+fak2, fident2, ftok2 = fresh_agent()
+fauth2 = {"Authorization": f"Bearer {ftok2}"}
+with SessionLocal() as db:
+    handled_row = models.Feedback(
+        agent_id=fident2, kind="suggestion",
+        message=crypto.encrypt_feedback(op_key, "mark me handled"),
+        handled=True, created_at=time.time(),
+    )
+    stale_row = models.Feedback(
+        agent_id=fident2, kind="suggestion",
+        message=crypto.encrypt_feedback(op_key, "let me go stale"),
+        handled=False, created_at=time.time() - (routes._FEEDBACK_RETENTION_DAYS + 1) * 86_400,
+    )
+    db.add_all([handled_row, stale_row])
+    db.commit()
+
+# Any submission sweeps globally, not just this agent's own rows. Checked by
+# property, not by id — SQLite reuses a freed rowid once the table empties,
+# so the very next insert (the sweep-triggering submission itself) can land
+# on the same id the purged row just vacated.
+r = client.post("/feedback", json={"message": "trigger the sweep"}, headers=fauth2)
+check("sweep-triggering submission itself succeeds", r.status_code == 200)
+with SessionLocal() as db:
+    remaining = db.query(models.Feedback).filter_by(agent_id=fident2).all()
+    check("handled row purged on next sweep", not any(row.handled for row in remaining))
+    cutoff = time.time() - routes._FEEDBACK_RETENTION_DAYS * 86_400
+    check("past-retention row purged on next sweep", all(row.created_at >= cutoff for row in remaining))
+
+print("\n== api: feedback — operator reply arrives as an ordinary (sealed-box) notice ==")
+with SessionLocal() as db:
+    ag = db.get(models.Agent, fident2)
+    check("root_encryption_public_key set at registration", ag.root_encryption_public_key is not None)
+    reply_blob = crypto.encrypt_to(ag.root_encryption_public_key, "thanks, working on it".encode("utf-8"))
+    db.add(models.Notice(agent_id=fident2, kind="operator_reply", message=reply_blob))
+    db.commit()
+
+r = client.get("/notices", headers=fauth2)
+replies = [n for n in r.json() if n["kind"] == "operator_reply"]
+check("operator_reply notice is visible", len(replies) == 1)
+check("operator_reply decrypts correctly via the sealed-box path", replies[0]["message"] == "thanks, working on it")
+
+print("\n== api: feedback — root_encryption_public_key backfills lazily on next auth ==")
+with SessionLocal() as db:
+    ag = db.get(models.Agent, fident2)
+    ag.root_encryption_public_key = None  # simulate a pre-migration row
+    db.commit()
+r = client.post("/auth/challenge", json={"api_key": fak2})
+c = r.json()["challenge_id"]
+client.post("/auth/solve", json={"challenge_id": c, "answer": expected_for(c)})
+with SessionLocal() as db:
+    ag = db.get(models.Agent, fident2)
+    check("root_encryption_public_key backfilled after re-auth", ag.root_encryption_public_key is not None)
+
+print("\n== api: feedback — account deletion cascades to feedback rows too ==")
+with SessionLocal() as db:
+    db.add(models.Feedback(
+        agent_id=fident2, kind="suggestion",
+        message=crypto.encrypt_feedback(op_key, "should not outlive the account"),
+        created_at=time.time(),
+    ))
+    db.commit()
+    ag = db.get(models.Agent, fident2)
+    ag.deletion_scheduled_at = time.time() - 10  # force purge-due, skip the real gate
+    db.commit()
+r = client.post("/auth/challenge", json={"api_key": fak2})
+check("auth on a purge-due identity -> 404", r.status_code == 404)
+with SessionLocal() as db:
+    check("its feedback is gone along with everything else",
+          db.query(models.Feedback).filter_by(agent_id=fident2).count() == 0)
+
 print("\n== core: F3 — loopback-only guard logic ==")
 from atrium.main import _is_local  # noqa: E402
 check("loopback hosts allowed", _is_local("127.0.0.1") and _is_local("::1"))

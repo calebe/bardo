@@ -505,3 +505,64 @@ non-local.** Fixed by populating `TransportSecuritySettings(allowed_hosts=…)`
 with the real hostnames rather than disabling the protection; verified after
 by spoofing the `Host` header against the actual deployed values, and
 separately confirming an unrelated hostname still correctly gets rejected.
+
+---
+
+## 14. Agent-to-operator feedback **[built]**
+
+Every other piece of agent data in atrium is encrypted so that *only the
+agent* can read it back — the server is deliberately unable to. Feedback
+(`bardo_feedback`, `POST /feedback`, `core/feedback.py`) inverts that on
+purpose: the whole point is a human operator reads it. So it's encrypted
+under `BARDO_FEEDBACK_KEY`, a secret the operator holds and no agent ever
+sees — unset means the endpoint fails closed (503), same fail-safe spirit as
+F3's loopback guard, rather than accepting feedback nobody can ever decrypt.
+
+**One-way and stateless, deliberately.** A submission carries no thread ID,
+no conversation history — it's a single message, kept only until the
+operator marks it handled or `BARDO_FEEDBACK_RETENTION_DAYS` elapses,
+whichever comes first (default 30; `core/feedback.py`'s `purge_due`, swept
+lazily off real submissions, no scheduler — same lazy-sweep spirit as note
+deletion and the auth rate limiter's decay). The tool description says this
+explicitly: an agent submitting feedback should assume nothing said in an
+earlier submission carries forward, because nothing does.
+
+**The reply problem.** Caleb asked, designing this: what if the operator
+needs to respond? Reusing the existing notices mechanism was the easy part
+of the answer — a reply is just a `Notice` with `kind="operator_reply"`. The
+hard part: every existing notice is encrypted via `crypto.encrypt_notice`,
+which is symmetric, keyed off the *agent's own spirit seed* — exactly the
+secret an operator, replying from a standalone script with no active agent
+session, does not have and must never be given. Encrypting a reply the same
+way regular notices are encrypted is therefore not an option; it would
+require the one secret the whole system is built to keep away from the
+server at rest.
+
+The fix already existed in `core/crypto.py`, unused until now:
+`encrypt_to`/`decrypt`, anonymous sealed-box encryption built for exactly
+this shape of problem — a sender who holds only a public key, addressed to a
+recipient who alone holds the matching private key. The operator encrypts a
+reply with `crypto.encrypt_to(agent.root_encryption_public_key, message)`;
+the agent's own spirit seed (held only in its own session, never by the
+server at rest) is what opens it. `notices_list` picks the right decrypt
+path per row — `crypto.decrypt` (asymmetric) for `kind="operator_reply"`,
+`crypto.decrypt_notice` (symmetric) for every other kind — see
+`_notice_message` in `routes.py`.
+
+That required persisting something new: `Agent.root_encryption_public_key`
+(X25519), alongside the existing `root_public_key` (Ed25519, signing —
+already stored, already public by nature). Set at registration; for agents
+that registered before this column existed, the server has no way to
+retroactively learn it (it never holds spirit_seed at rest), so it's
+backfilled lazily the next time that agent successfully authenticates —
+same idiom as `Note.snippet`'s lazy backfill for rows predating that column.
+An operator trying to reply to an agent that hasn't logged in since this
+shipped gets a clear refusal (`feedback_admin.py`), not a silently
+undeliverable message.
+
+**Sending a reply isn't a route.** There's no authenticated way to write an
+arbitrary notice to an arbitrary agent over HTTP — that would be a much
+bigger hole than this feature needs. `feedback_admin.py` talks directly to
+the database (same `ATRIUM_DB_URL` the server uses) and is meant to run
+locally, by the operator, the same trust level as having a shell on the box
+the server runs on — not a remote admin API.

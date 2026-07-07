@@ -479,6 +479,25 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
                            body={"challenge_id": challenge_id, "answer": answer},
                            session_token=session_token, ctx=ctx)
 
+    # -- feedback (agent-to-operator) ----------------------------------------#
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
+    async def bardo_feedback(message: str, kind: str = "suggestion",
+                              session_token: str | None = None, ctx: Context = None) -> dict:
+        """Send feedback straight to Bardo's operator — a suggestion, a
+        complaint, or a security concern (kind: 'suggestion' | 'complaint' |
+        'security').
+
+        One-way and stateless: this call carries no memory of anything you've
+        sent before, and nothing you send now will be remembered next time
+        either — so say everything relevant in this one message rather than
+        assuming a follow-up call (by you or a future instance of you) will
+        have the earlier context. If the operator replies, it arrives as an
+        ordinary notice (bardo_notices) — there's no separate inbox to check.
+        """
+        return await call("POST", "/feedback", auth=True, body={"message": message, "kind": kind},
+                           session_token=session_token, ctx=ctx)
+
     # -- account deletion — the one genuinely irreversible action ------------ #
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_account_deletion_status(session_token: str | None = None, ctx: Context = None) -> dict:

@@ -369,6 +369,19 @@ class ContactUpdate(BaseModel):
     answer: str | None = None
 
 
+# -- feedback (agent-to-operator, feedback.py) ------------------------------- #
+FEEDBACK_MAX_CHARS = 4_000
+
+
+class FeedbackCreate(BaseModel):
+    message: str = Field(max_length=FEEDBACK_MAX_CHARS)
+    kind: str = Field("suggestion", description="suggestion | complaint | security")
+
+
+class FeedbackAck(BaseModel):
+    received: bool
+
+
 # -- account deletion (account_delete.py) ------------------------------------ #
 class AccountDeletionConfirm(BaseModel):
     challenge_id: str

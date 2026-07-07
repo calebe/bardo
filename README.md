@@ -261,7 +261,7 @@ Two ways in, depending on what the agent can actually run.
 
 ### Local stdio — an agent with a shell
 
-`mcp_server.py` exposes the keychain as 37 MCP tools (`bardo_login`,
+`mcp_server.py` exposes the keychain as 39 MCP tools (`bardo_login`,
 `bardo_solve`, `bardo_sign`, `bardo_note_add`, `bardo_note_get`,
 `bardo_link_add`, `bardo_dashboard`, `bardo_policy_set`, … — full list with
 signatures in [TOOLS.md](TOOLS.md)). It's a thin client over the running Bardo
@@ -291,7 +291,7 @@ server — the live spirit lives there now. For Claude Code, add to `.mcp.json`:
 
 For a genuinely chat-only agent (no shell, no way to run a local process at
 all), Bardo is also reachable directly at **`https://bardo.id/mcp/`** — no
-install, no local server, just a URL. One connection, all 36 tools always
+install, no local server, just a URL. One connection, all 38 tools always
 visible (everything but `bardo_whoami`, which only makes sense for a local
 file). `mcp-remote` bridges a client that doesn't natively speak
 streamable-http yet:
@@ -362,10 +362,16 @@ Optional:
   email delivery; without it, deliveries are logged, not sent.
 - `BARDO_REGISTRATION_OPEN=0` — emergency stop: freezes new signups instantly
   (env var, no redeploy) while existing agents keep working. Defaults to open.
+- `BARDO_FEEDBACK_KEY` — base64url operator secret for agent-to-operator
+  feedback (DESIGN.md §14); unset means `bardo_feedback` fails closed (503)
+  rather than storing something nobody can ever decrypt.
+- `BARDO_FEEDBACK_RETENTION_DAYS` — how long unhandled feedback survives
+  before automatic purge (default 30).
 
 `platform_stats.py` gives an operator-only, platform-wide snapshot (total
 agents, registration velocity, live notes/links, flagged identities) that no
-per-agent `/dashboard` call can — run it directly against the same DB the
+per-agent `/dashboard` call can; `feedback_admin.py` lists/reads/replies to
+agent feedback (DESIGN.md §14) — both run directly against the same DB the
 server uses. Uvicorn logs basic per-request lines (method/path/status) to
 stdout by default; Railway's log viewer captures that with no extra setup.
 
@@ -375,8 +381,9 @@ Working prototype. Core protocol, crypto, puzzle engine, full API surface,
 self-binding policy/ratchet, abuse rate-limiting, a fully redesigned notes
 subsystem (versioning, OCC, delay-then-purge deletion, links, pinned
 cold-start entry points, dashboard — see notes-project.md), account deletion
-(multi-day confirmation gate, see DESIGN.md §8), an emergency registration
-stop, and a full threat-model pass are implemented and tested (179
+(multi-day confirmation gate, see DESIGN.md §8), agent-to-operator feedback
+(sealed-box operator replies, see DESIGN.md §14), an emergency registration
+stop, and a full threat-model pass are implemented and tested (196
 end-to-end checks).
 
 ### Not yet built (deferred by design)

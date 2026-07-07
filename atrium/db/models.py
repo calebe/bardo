@@ -63,6 +63,15 @@ class Agent(Base):
     # the grace period shouldn't retroactively move an already-running countdown).
     deletion_scheduled_at: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # X25519 root encryption public key. Unlike root_public_key (Ed25519,
+    # signing — public by nature), this lets someone who does NOT hold the
+    # spirit seed encrypt *to* the agent (crypto.encrypt_to) — needed for the
+    # operator-reply half of feedback.py, since the operator never has any
+    # agent's spirit seed. Populated at registration; agents that registered
+    # before this column existed have it backfilled lazily on next successful
+    # auth (same idiom as Note.snippet's lazy backfill).
+    root_encryption_public_key: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+
     services: Mapped[list["ServiceKey"]] = relationship(
         back_populates="agent", cascade="all, delete-orphan"
     )
@@ -180,6 +189,26 @@ class Notice(Base):
     message: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     read: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[float] = mapped_column(Float, default=time.time)
+
+
+class Feedback(Base):
+    """Agent-to-operator feedback (bardo_feedback, feedback.py). Encrypted
+    under an operator-held key (crypto.encrypt_feedback) — NOT the agent's own
+    spirit seed, since the whole point is a human operator can read these
+    without any agent's cooperation, unlike everything else in atrium.
+    One-way and stateless by design: no thread, no context carried between
+    submissions. Retention: purged once handled=True, or after
+    BARDO_FEEDBACK_RETENTION_DAYS, whichever comes first (see routes.py's
+    _sweep_feedback / feedback.purge_due)."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.identifier"), index=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)  # suggestion | complaint | security
+    message: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    handled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    created_at: Mapped[float] = mapped_column(Float, default=time.time, index=True)
 
 
 class DBBackoffState(Base):
