@@ -374,6 +374,11 @@ Optional:
   Deliberately generic: Bardo fires one webhook/email; what receives it and
   how it fans out from there (Telegram, Slack, anything) is the operator's
   own choice, built outside this repo.
+- `BARDO_OPERATOR_NOTIFY_SECRET` — optional, webhook only. Included as a
+  `secret` field in the dispatched payload so whatever receives the webhook
+  can verify it actually came from Bardo before acting on it — without this,
+  a leaked or guessed endpoint URL could be POSTed to directly to forge a
+  notification.
 
 `platform_stats.py` gives an operator-only, platform-wide snapshot (total
 agents, registration velocity, live notes/links, flagged identities) that no

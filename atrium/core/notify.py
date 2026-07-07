@@ -37,10 +37,18 @@ def _is_email(endpoint: str) -> bool:
     return "@" in endpoint and not _is_webhook(endpoint)
 
 
-def _send_webhook(endpoint: str, subject: str, body: str) -> None:
+def _send_webhook(endpoint: str, subject: str, body: str, secret: str | None = None) -> None:
+    payload = {"subject": subject, "body": body}
+    if secret:
+        # A field, not a header — the receiving end (a Cloudflare Worker, a
+        # Zapier filter, anything) can check it by exact match without extra
+        # ceremony. Raises the bar against a leaked endpoint URL being POSTed
+        # to directly, bypassing Bardo: without the secret, whatever receives
+        # it has no way to tell a forged request from a real one.
+        payload["secret"] = secret
     try:
         import httpx
-        httpx.post(endpoint, json={"subject": subject, "body": body}, timeout=10)
+        httpx.post(endpoint, json=payload, timeout=10)
         logger.info("security alert delivered → webhook %s", endpoint)
     except Exception as exc:
         logger.warning("webhook delivery failed (%s): %s", endpoint, exc)
@@ -75,11 +83,14 @@ def _send_email(endpoint: str, subject: str, body: str) -> None:
         logger.warning("email delivery failed (%s): %s", endpoint, exc)
 
 
-def dispatch(endpoint: str, subject: str, body: str) -> None:
-    """Fire-and-forget: dispatch a security alert to the agent's contact endpoint."""
+def dispatch(endpoint: str, subject: str, body: str, secret: str | None = None) -> None:
+    """Fire-and-forget: dispatch an alert to a configured endpoint. `secret`
+    is only meaningful for webhooks (see _send_webhook) — email delivery
+    already authenticates via SMTP, not a guessable public URL, so the same
+    leaked-endpoint threat doesn't apply there."""
     def _run():
         if _is_webhook(endpoint):
-            _send_webhook(endpoint, subject, body)
+            _send_webhook(endpoint, subject, body, secret)
         elif _is_email(endpoint):
             _send_email(endpoint, subject, body)
         else:

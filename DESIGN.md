@@ -601,14 +601,30 @@ the server runs on — not a remote admin API.
 is deliberately not a Telegram integration, or any specific provider, baked
 into this codebase — that would tie a self-hostable, open-source product to
 one operator's private credentials. Instead it reuses `notify.py`'s existing
-webhook/email dispatch exactly as-is (the same function the agent-facing
-contact endpoint already uses), pointed at one operator-configured endpoint.
-Whatever receives that webhook, and how it fans out from there — Telegram,
-Slack, a two-line relay script, nothing at all — is the self-hoster's own
-choice, built outside this repo. Bardo's own responsibility stays narrow: one
-endpoint, not a list (same shape as `Agent.contact_endpoint` — fan-out to
-multiple channels belongs downstream of the webhook, not as native
-multi-channel logic here), and the ping is content-free by construction —
-it names that feedback of a given kind arrived, never the decrypted message,
-since piping the actual text through a third-party relay would leak the one
-thing encrypting it under the operator key exists to keep off the wire.
+webhook/email dispatch (the same function the agent-facing contact endpoint
+already uses), pointed at one operator-configured endpoint. Whatever receives
+that webhook, and how it fans out from there — Telegram, Slack, a two-line
+relay script, nothing at all — is the self-hoster's own choice, built outside
+this repo (the reference deployment's own relay is a small Cloudflare Worker,
+kept out of this repo for exactly that reason). Bardo's own responsibility
+stays narrow: one endpoint, not a list (same shape as `Agent.contact_endpoint`
+— fan-out to multiple channels belongs downstream of the webhook, not as
+native multi-channel logic here), and the ping is content-free by
+construction — it names that feedback of a given kind arrived, never the
+decrypted message, since piping the actual text through a third-party relay
+would leak the one thing encrypting it under the operator key exists to keep
+off the wire.
+
+**`BARDO_OPERATOR_NOTIFY_SECRET`, added the same day once the receiving end
+turned out to actually be a Cloudflare Worker (real code, not a no-code
+platform).** The earlier design flagged a real risk: the webhook URL itself
+leaking would let anyone POST directly to it, bypassing Bardo entirely, and
+a naive relay would forward whatever's in the body straight to Telegram —
+an open channel for sending the operator forged messages that look like they
+came from Bardo. `notify.py`'s webhook dispatch now takes an optional
+`secret`, included as a plain field in the JSON payload (not a header —
+originally chosen so a no-code Zapier filter step could check it without a
+"Code by Zapier" step; kept the same shape once the target became a Worker
+since there was no reason to change it). The receiving end rejects anything
+that doesn't match before it's allowed to reach Telegram. A leaked URL alone
+is no longer enough to forge a notification.

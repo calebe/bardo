@@ -801,7 +801,7 @@ with SessionLocal() as db:
 print("\n== api: feedback — operator notification is content-free, and off by default ==")
 _dispatched = []
 _real_dispatch = routes.notify.dispatch
-routes.notify.dispatch = lambda endpoint, subject, body: _dispatched.append((endpoint, subject, body))
+routes.notify.dispatch = lambda endpoint, subject, body, secret=None: _dispatched.append((endpoint, subject, body, secret))
 
 fak3, fident3, ftok3 = fresh_agent()
 fauth3 = {"Authorization": f"Bearer {ftok3}"}
@@ -809,14 +809,38 @@ client.post("/feedback", json={"message": "should not leak into any webhook"}, h
 check("no notification fired with BARDO_OPERATOR_NOTIFY_ENDPOINT unset", len(_dispatched) == 0)
 
 routes._OPERATOR_NOTIFY_ENDPOINT = "https://example.invalid/hook"
+routes._OPERATOR_NOTIFY_SECRET = "s3cr3t-webhook-token"
 r = client.post("/feedback", json={"message": "should not leak into any webhook"}, headers=fauth3)
 check("submission still succeeds with a notify endpoint configured", r.status_code == 200)
 check("exactly one notification fired once configured", len(_dispatched) == 1)
-endpoint, subject, body = _dispatched[0]
+endpoint, subject, body, secret = _dispatched[0]
 check("notification targets the configured endpoint", endpoint == "https://example.invalid/hook")
 check("notification body never contains the actual message text", "should not leak" not in body)
+check("notification carries the configured shared secret", secret == "s3cr3t-webhook-token")
+
+print("\n== core: notify.py — webhook payload actually embeds the secret when given ==")
+from atrium.core import notify as _notify  # noqa: E402
+_posted = {}
+
+
+class _FakeHttpx:
+    @staticmethod
+    def post(url, json, timeout):
+        _posted["url"], _posted["json"] = url, json
+
+
+import sys as _sys  # noqa: E402
+_real_httpx = _sys.modules.get("httpx")
+_sys.modules["httpx"] = _FakeHttpx
+_notify._send_webhook("https://example.invalid/hook", "subj", "body text", secret="topsecret")
+check("payload includes the secret field when one is given", _posted["json"].get("secret") == "topsecret")
+_posted.clear()
+_notify._send_webhook("https://example.invalid/hook", "subj", "body text")
+check("payload omits the secret field entirely when none is given", "secret" not in _posted["json"])
+_sys.modules["httpx"] = _real_httpx
 
 routes._OPERATOR_NOTIFY_ENDPOINT = None
+routes._OPERATOR_NOTIFY_SECRET = None
 routes.notify.dispatch = _real_dispatch
 
 print("\n== core: F3 — loopback-only guard logic ==")

@@ -70,6 +70,9 @@ def _operator_feedback_key() -> bytes | None:
 
 
 _OPERATOR_NOTIFY_ENDPOINT = os.environ.get("BARDO_OPERATOR_NOTIFY_ENDPOINT")
+# Shared secret for the operator-notify webhook only — proves a request
+# actually came from Bardo, not just anyone who obtained the endpoint URL.
+_OPERATOR_NOTIFY_SECRET = os.environ.get("BARDO_OPERATOR_NOTIFY_SECRET")
 
 
 def _claim_url(token: str) -> str:
@@ -1493,5 +1496,6 @@ def feedback_submit(req: schemas.FeedbackCreate, sess=Depends(require_session), 
             f"New agent feedback received (kind: {req.kind}). "
             f"Check it with feedback_admin.py — this notification doesn't "
             f"carry the message itself.",
+            secret=_OPERATOR_NOTIFY_SECRET,
         )
     return schemas.FeedbackAck(received=True)
