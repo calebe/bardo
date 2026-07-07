@@ -91,6 +91,42 @@ mcp = FastMCP("bardo", streamable_http_path="/", transport_security=_TRANSPORT_S
 # reported version silently falls back to the `mcp` package's own version,
 # not Bardo's. Set directly on the wrapped server instead.
 mcp._mcp_server.version = __version__
+
+# FastMCP's own streamable_http_app() builds its StreamableHTTPSessionManager
+# with no session_idle_timeout at all — confirmed 2026-07-07 by reading its
+# source; the setting isn't even in FastMCP's own public Settings, so there's
+# no way to configure it through FastMCP's constructor. Every MCP session
+# lives in a plain, never-pruned dict (the session manager's own
+# _server_instances/_session_owners) that's only cleared when a session's
+# task crashes — otherwise it grows one entry per distinct session for the
+# life of the process. This was a real, live bug, not a hypothesis: Railway's
+# HTTP logs showed GET /mcp/ long-poll streams (the SDK's 900s/15-min SSE
+# retry cycle) completing cleanly at 200, while production memory climbed
+# monotonically for 27+ hours with zero recovery, tracking real external MCP
+# traffic — because nothing ever pruned the session behind each stream once
+# it ended.
+#
+# Fix: build the session manager ourselves, mirroring exactly what
+# streamable_http_app() would have built — same app/event_store/
+# retry_interval/json_response/stateless/security_settings, read directly off
+# `mcp` so this can't silently drift from FastMCP's own defaults — plus the
+# one missing setting. streamable_http_app() only creates its own session
+# manager lazily if self._session_manager is still None (confirmed by reading
+# its source), so pre-setting it here means ours is used instead — same
+# trick as the version fix above. 30 minutes comfortably exceeds the observed
+# 15-minute SSE retry cycle (the SDK's own docstring recommends exactly this
+# value) so normal polling gaps aren't mistaken for an idle session.
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager as _SessionManager
+mcp._session_manager = _SessionManager(
+    app=mcp._mcp_server,
+    event_store=mcp._event_store,
+    json_response=mcp.settings.json_response,
+    stateless=mcp.settings.stateless_http,
+    security_settings=mcp.settings.transport_security,
+    retry_interval=mcp._retry_interval,
+    session_idle_timeout=1800,
+)
+
 _call = make_call(client_factory=_client_factory, resolve_auth_header=_resolve_auth_header)
 register_public_utility_tools(mcp, _call)
 register_authenticated_tools(mcp, _call)

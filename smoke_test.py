@@ -824,4 +824,17 @@ from atrium.main import _is_local  # noqa: E402
 check("loopback hosts allowed", _is_local("127.0.0.1") and _is_local("::1"))
 check("remote hosts denied by guard", not _is_local("203.0.113.7"))
 
+print("\n== core: MCP session manager has an idle timeout configured ==")
+# Regression guard for a real bug found 2026-07-07: FastMCP's own
+# streamable_http_app() never configures session_idle_timeout at all, so
+# every MCP session lived forever in a never-pruned dict — a genuine,
+# unbounded production memory leak, confirmed live via Railway's HTTP logs
+# before the fix in atrium/mcp_public.py (pre-building the session manager
+# ourselves, since FastMCP's constructor has no way to set this).
+from atrium.mcp_public import mcp as _remote_mcp  # noqa: E402
+check("session manager has a real (non-None) idle timeout",
+      _remote_mcp._session_manager.session_idle_timeout is not None)
+check("idle timeout comfortably exceeds the observed 15-min SSE retry cycle",
+      _remote_mcp._session_manager.session_idle_timeout >= 1800)
+
 print(f"\nAll {ok} checks passed.\n")

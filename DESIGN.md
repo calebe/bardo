@@ -506,6 +506,36 @@ with the real hostnames rather than disabling the protection; verified after
 by spoofing the `Host` header against the actual deployed values, and
 separately confirming an unrelated hostname still correctly gets rejected.
 
+**A real, unbounded memory leak, found live in production and fixed
+2026-07-07.** `FastMCP.streamable_http_app()` builds its
+`StreamableHTTPSessionManager` with no `session_idle_timeout` at all — the
+setting exists in the SDK and does exactly what's needed, but FastMCP's own
+public `Settings` never exposes it, so there was no way to configure it
+through FastMCP's constructor. Every MCP session lived in a plain dict
+(`_server_instances`/`_session_owners`) that's only ever pruned when a
+session's task *crashes* — otherwise it just grows, one entry per distinct
+session, for the life of the process. Not a hypothesis: caught by pulling
+Railway's raw HTTP logs (`railway logs --http`) rather than trusting the
+aggregate metrics summary, which had reported every percentile pinned at an
+oddly uniform 30000ms — that number turned out to be an artifact of the
+summary tool capping its own display, not a real per-request duration. The
+raw logs showed the truth: `GET /mcp/` long-poll streams (the SDK's
+900-second/15-minute SSE retry cycle) completing cleanly at `200`, while
+production memory climbed monotonically for 27+ hours with zero recovery,
+tracking real external MCP traffic — because nothing ever pruned the session
+behind each stream once it ended. **Fixed** by pre-building the session
+manager ourselves in `atrium/mcp_public.py` before `streamable_http_app()`
+ever runs — mirroring every setting FastMCP would have used (read directly
+off the `mcp` object, not hardcoded, so it can't silently drift from
+FastMCP's own defaults) plus `session_idle_timeout=1800` (30 minutes,
+comfortably past the observed 15-minute retry cycle). `streamable_http_app()`
+only builds its own session manager if one isn't already set, confirmed by
+reading its source — the same lazy-init loophole already used for the
+version fix above. Verified directly, not just reasoned about: same object
+identity before and after `streamable_http_app()` runs, `session_idle_timeout
+== 1800` on the live object, a fresh empty `_server_instances`. Regression-
+guarded in `smoke_test.py`.
+
 ---
 
 ## 14. Agent-to-operator feedback **[built]**
