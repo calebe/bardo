@@ -41,7 +41,19 @@ should get the same delayed/abortable treatment a policy loosening gets
 its own constant (the blast radius can differ a lot from a widened session
 policy) is unresolved.
 
-**4. `Document` is a schema, not a persisted table — and `kind` has exactly
+**4a. MVP scope: attestation ships first, not delegation.** First guess was
+delegation — anchored on the voucher walkthrough, which is fundamentally a
+delegation, without stepping back to weigh the full space fairly. Corrected
+directly: attestation covers five of the six categories in the original
+framing (provenance, witness, commitment, contract, greeting-card) against
+delegation's one, and "I assert X, verifiably" is a far more universal
+primitive than "I grant you scoped authority" — genuinely useful, but a
+narrower, more specialized need. It's also simpler to build first:
+attestation needs none of delegation's real complexity (no attenuation
+validation, no parent chain, no open widening-delay question). Both more
+useful and easier to ship — settled.
+
+**4b. `Document` is a schema, not a persisted table — and `kind` has exactly
 two values.** Correction to the original framing: this isn't a `Notice`/
 `Feedback`-style DB row, it's a shape that gets constructed and signed, then
 handed back — nothing here implies Bardo stores it (see decision 5). `kind`
@@ -229,19 +241,26 @@ party who has no direct relationship with Bardo at all.
 
 ---
 
-## Still open
+## Still open, reordered now that attestation is confirmed as v1
 
-- Concrete field *types* for the schema above (not drafted in detail yet).
-- Witness/co-sign mechanics beyond "multiple independent attestations
-  referencing the same claim" — is that actually sufficient, or does some
-  case need real multi-party co-signing over one payload?
+- **Concrete attestation schema — exact field types**, not just the
+  conceptual shape (decision 4b's list). Next up: it's the direct,
+  concrete follow-on to "attestation ships first," and it's a real
+  prerequisite for the item below, since revocation's exact cryptographic
+  construction needs to know precisely what's being hashed.
+- Exact revocation-list endpoint/mechanism design (a real Bitstring-
+  Status-List-style implementation, or something simpler to start) —
+  blocking regardless of kind, since every document needs this to be a
+  usable v1.
+- Witness/co-sign mechanics — likely *already* answered as a side effect
+  of a well-designed attestation schema, not a separate mechanism: if the
+  schema properly supports referencing a shared external claim, "multiple
+  independent attestations pointing at the same reference" is witnessing,
+  free. Worth confirming once the schema is drafted, not a dedicated
+  design question on its own.
 - Commitment/contract semantics beyond "two cross-referencing attestations"
   — vaguest part of the original framing, least urgent to resolve.
-- Delegation-widening mechanics (decision 3): reuse `loosen_delay_seconds`
-  or a dedicated constant?
-- Exact revocation-list endpoint/mechanism design (a real Bitstring-
-  Status-List-style implementation, or something simpler to start).
-- The `bardo_issue_document` convenience tool — real design, not yet
-  sketched beyond the idea.
-- MVP scope: which `kind` ships first, and what's the smallest real thing
-  worth building, versus designing every eventual case up front.
+- The `bardo_issue_document` convenience tool — depends on the schema
+  above being settled first.
+- Delegation-widening mechanics (decision 3) — deferred along with
+  delegation itself now that it isn't v1.
