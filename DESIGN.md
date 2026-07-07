@@ -357,7 +357,7 @@ field. **[open]**
 | Item | When it stops being optional |
 |---|---|
 | Real migrations (Alembic) | the day before atrium stores its first real spirit key |
-| Postgres + shared session/rate store (Redis/KMS) | concurrency / multi-process |
+| ~~Postgres~~ **[built, §15]** — shared session store (Redis/KMS) still deferred | multi-process concurrency (spirit seeds are still process-local RAM regardless of which DB backs the durable tables) |
 | Hardware-factor bootstrapping (§9) | agents start running locally |
 | Per-session scope narrowing | when least-privilege-per-token is wanted |
 | Adaptive puzzle difficulty | observed false-negative rate gets annoying |
@@ -628,3 +628,95 @@ originally chosen so a no-code Zapier filter step could check it without a
 since there was no reason to change it). The receiving end rejects anything
 that doesn't match before it's allowed to reach Telegram. A leaked URL alone
 is no longer enough to forge a notification.
+
+---
+
+## 15. SQLite → Postgres migration **[built]**
+
+Production ran on SQLite from the start, on a Railway-mounted volume — a
+deliberate choice while the project was small, deferred specifically to
+avoid Postgres's overhead ("$40/mo" was the figure on file). That number
+never held up: checking Railway's actual pricing directly (not repeating
+the old estimate) showed Postgres bills from the same usage-based pool as
+everything else, and real spend over the first seven days of Bardo being
+public was **$0.20 total**. The real blocker was a stale, unverified number,
+not an actual cost.
+
+Three concrete reasons this stopped being purely deferrable, once the cost
+objection fell away: (1) SQLite's bare-rowid reuse after a delete caused a
+genuine test-flakiness bug this same session (the smoke-test "handled row
+purged" check — see `smoke_test.py`'s history); Postgres sequences don't do
+this. (2) `platform_stats.py`/`feedback_admin.py` have never been runnable
+against production at all — no remote-exec into the Railway container, and
+SQLite isn't network-reachable, so there was no way to actually read
+anything they queried. Postgres, being a real network service, closes that
+gap immediately. (3) The schema was already fully portable — Alembic/
+SQLAlchemy were never SQLite-specific — so only the *data* migration was
+ever the missing piece, not a redesign.
+
+**The real obstacle, and the actual unlock.** No standard tool does this
+migration cleanly for this specific situation: `pgloader` has no official
+Windows build (WSL-only in practice, confirmed by checking rather than
+assuming), and there's no remote shell into the Railway container to run
+one there directly even if it did. The unlock was `railway volume files
+download` — confirmed working live (after discovering Git Bash's automatic
+path-mangling was silently breaking it; fixed with `MSYS_NO_PATHCONV=1`) —
+which gets a real snapshot of the live SQLite file onto the local machine.
+From there, Postgres — unlike SQLite — *is* reachable over the network from
+anywhere, so a plain SQLAlchemy script (`migrate_sqlite_to_postgres.py`,
+kept in the repo as a real record rather than a throwaway) could read the
+snapshot and write directly into the new Postgres DB, no exotic tooling
+needed.
+
+**Two real correctness details the script had to get right, not just
+"copy the rows":** explicit-id inserts throughout (never relying on
+Postgres's own autoincrement for existing rows), since `Note.supersedes`/
+`superseded_by` and `Link.from_note_id`/`to_note_id` reference exact
+existing ids — a fresh autoincrement id would silently break every
+cross-reference. `Note` specifically needed a two-phase insert:
+`supersedes` always points *backward* to an already-inserted (smaller) id,
+safe in a single ascending pass, but `superseded_by` points *forward* to a
+newer version's id that doesn't exist yet at insert time — phase one
+inserts every row with `superseded_by` NULL, phase two backfills the real
+values once every row exists. After all explicit-id inserts, every
+autoincrement table's Postgres sequence gets reset to its real max id, so
+the first new row created after cutover doesn't collide — verified directly
+with a real test insert, not just asserted.
+
+**A migration this consequential got a real plan, not just execution.**
+Caleb's own framing going in was to "walk a little steadier"; the plan
+(written via `EnterPlanMode`, approved before any production-touching
+action) split the work into a fully offline, zero-risk Phase A (download,
+migrate into a *test* Postgres copy, verify thoroughly) and a short,
+explicit Phase B (final fresh snapshot, real migration, pointer switch,
+live verification) — with an explicit stop between them for a go-ahead
+before touching anything live.
+
+**Verification, at every layer, not just "it ran without an error":**
+row-count parity per table against the real snapshot; a real agent's vault
+ciphertext (salt/nonce/ciphertext) confirmed byte-identical, not just
+present; the one live note that actually exercises the versioning chain
+confirmed to have zero `supersedes`/`superseded_by` mismatches after
+migrating — the trickiest correctness case, checked directly rather than
+assumed from the row count matching. The full smoke suite was pointed at a
+real, separate Postgres database (`smoke_test.py` was changed to respect a
+pre-set `ATRIUM_DB_URL` instead of always overwriting it with a fresh
+SQLite tempfile) and passed clean, 206/206 — surfacing one genuine, well-
+understood false alarm along the way: running the suite twice against the
+*same* persistent Postgres database (unlike SQLite's fresh-tempfile-per-run
+default) tripped the DB-backed registration rate limiter on the second run,
+correctly, since that limiter's whole job is to persist across restarts.
+Not a bug — a reminder that some of this project's own state is deliberately
+built to survive exactly the kind of repeated run a throwaway test usually
+assumes away.
+
+**Cutover itself:** one final fresh snapshot (captures anything written
+since the Phase-A copy), the same script re-run into a clean schema,
+`ATRIUM_DB_URL` switched to Postgres's private (in-network, not public-
+proxy) connection string on the live service, one redeploy — the same brief
+interruption any ordinary deploy already causes, nothing new. Verified live
+immediately after: a real puzzle solve against production, the real
+account's dashboard and notes (content decrypting correctly, not just
+present as opaque bytes), and a fresh `bardo_feedback` submission
+confirming the whole operator-notify chain still fires against the new
+backend too. The old SQLite backups are kept, not deleted, as a safety net.

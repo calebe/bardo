@@ -13,8 +13,12 @@ import tempfile
 import time
 
 # Point at a throwaway DB before importing the app (database.py reads env at import).
-_tmp = tempfile.mkdtemp()
-os.environ["ATRIUM_DB_URL"] = f"sqlite:///{_tmp}/smoke.db".replace("\\", "/")
+# Respects a pre-set ATRIUM_DB_URL (e.g. a throwaway Postgres DB, to verify the
+# suite runs identically against a non-SQLite backend) — defaults to a fresh
+# SQLite tempfile otherwise, same as always.
+if "ATRIUM_DB_URL" not in os.environ:
+    _tmp = tempfile.mkdtemp()
+    os.environ["ATRIUM_DB_URL"] = f"sqlite:///{_tmp}/smoke.db".replace("\\", "/")
 # TestClient's client host is "testclient" (non-loopback); allow it through the
 # F3 guard. The guard's decision logic is unit-tested separately below.
 os.environ["BARDO_ALLOW_REMOTE"] = "1"

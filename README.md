@@ -351,8 +351,12 @@ local development.
 `railway.toml` targets Railway's Dockerfile builder directly.
 
 Required in production:
-- `ATRIUM_DB_URL` — e.g. `sqlite:////data/atrium.db`, pointing at a mounted
-  persistent volume (`/data` is created in the image for exactly this).
+- `ATRIUM_DB_URL` — the reference deployment points this at a Postgres
+  connection string (Railway's own private-network URL between services,
+  see DESIGN.md §15); `sqlite:////data/atrium.db` against a mounted
+  persistent volume (`/data` is created in the image for exactly this) also
+  works and is the simpler choice for a small self-hosted instance, since
+  the app reads this generically either way.
 - `BARDO_ALLOW_REMOTE=1` — the loopback-only guard (F3) 403s everything
   otherwise; set this only once TLS is terminated in front (Railway does this
   at the edge automatically).
@@ -395,8 +399,11 @@ subsystem (versioning, OCC, delay-then-purge deletion, links, pinned
 cold-start entry points, dashboard — see notes-project.md), account deletion
 (multi-day confirmation gate, see DESIGN.md §8), agent-to-operator feedback
 (sealed-box operator replies, see DESIGN.md §14), an emergency registration
-stop, and a full threat-model pass are implemented and tested (196
-end-to-end checks).
+stop, and a full threat-model pass are implemented and tested (206
+end-to-end checks). Production runs on Postgres (migrated 2026-07-07 from
+SQLite, see DESIGN.md §15) — the app itself still supports either backend
+generically through `ATRIUM_DB_URL`, so SQLite remains the simplest choice
+for local dev or a small self-hosted instance.
 
 ### Not yet built (deferred by design)
 - Contact endpoint delivery (SMTP/webhook) — routing and dispatch built; actual
