@@ -126,7 +126,7 @@ def _purge_if_due(db: DbSession, agent: models.Agent) -> bool:
     True so the caller treats it as gone. Checked pre-auth (no spirit_seed
     exists yet at that point, and won't need to: nothing survives to notify).
 
-    Caleb, 2026-07-05: delete everything, including rate-limit state — the
+    Calebe, 2026-07-05: delete everything, including rate-limit state — the
     multi-day gate this sits behind already makes "delete to dodge a lockout"
     impractical (backoff caps at an hour; this takes a week-plus), so there's
     no real abuse case left to defend against by keeping it around."""
@@ -1457,7 +1457,7 @@ def _sweep_feedback(db: DbSession) -> None:
     """Physically purge rows that are handled or past retention — global,
     not per-agent (only the operator ever reads this table back), and lazy:
     runs opportunistically off real submissions, same spirit as
-    _sweep_deleted. No scheduler by design (Caleb, 2026-07-06)."""
+    _sweep_deleted. No scheduler by design (Calebe, 2026-07-06)."""
     now = time.time()
     rows = db.query(models.Feedback).all()
     due = [

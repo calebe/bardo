@@ -3,7 +3,7 @@
 No I/O, no DB, no crypto — mirrors notes.py/account_delete.py's split
 (persistence, encryption, and request auth all live in the routes).
 
-Design (2026-07-06, worked out with Caleb): feedback is encrypted under an
+Design (2026-07-06, worked out with Calebe): feedback is encrypted under an
 operator-held key (crypto.encrypt_feedback), not the agent's own spirit seed
 — the whole point is a human operator reads these without any agent's
 cooperation, unlike everything else in atrium. One-way and stateless: no

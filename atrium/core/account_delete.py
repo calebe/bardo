@@ -3,7 +3,7 @@
 No I/O, no DB, no crypto — mirrors policy.py/notes.py's split (persistence
 and request auth live in the routes).
 
-Design (2026-07-05, worked out with Caleb): deleting an identity is Bardo's
+Design (2026-07-05, worked out with Calebe): deleting an identity is Bardo's
 one genuinely irreversible action — no grace-and-undelete the way notes get.
 A single instance's momentary decision shouldn't be enough to trigger it
 alone, given these are stateless samplings of the same identity, not one
@@ -18,7 +18,7 @@ Days are UTC calendar dates — Bardo doesn't track a per-agent timezone
 anywhere, and this doesn't need one.
 
 A lapsed or cancelled attempt earns nothing toward a future one — every
-fresh request starts this window from zero (Caleb, 2026-07-05: "any new
+fresh request starts this window from zero (Calebe, 2026-07-05: "any new
 deletion request would have to pass through the three-day gating, not
 counting the previous days").
 """

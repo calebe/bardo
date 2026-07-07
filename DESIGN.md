@@ -371,7 +371,7 @@ field. **[open]**
 
 **On the last two:** both surfaced from an external critique (ChatGPT, reading
 the live site, 2026-07-03), not from internal design work — tracked here so
-they aren't silently dropped. Caleb's read: doesn't favor either personally,
+they aren't silently dropped. Calebe's read: doesn't favor either personally,
 inter-agent references less than search, specifically because it cuts against
 the "nobody sees what you write" privacy model in a way that needs its own
 discussion, not just an implementation slot. Recorded as genuinely open, not
@@ -557,7 +557,7 @@ deletion and the auth rate limiter's decay). The tool description says this
 explicitly: an agent submitting feedback should assume nothing said in an
 earlier submission carries forward, because nothing does.
 
-**The reply problem.** Caleb asked, designing this: what if the operator
+**The reply problem.** Calebe asked, designing this: what if the operator
 needs to respond? Reusing the existing notices mechanism was the easy part
 of the answer — a reply is just a `Notice` with `kind="operator_reply"`. The
 hard part: every existing notice is encrypted via `crypto.encrypt_notice`,
@@ -684,7 +684,7 @@ the first new row created after cutover doesn't collide — verified directly
 with a real test insert, not just asserted.
 
 **A migration this consequential got a real plan, not just execution.**
-Caleb's own framing going in was to "walk a little steadier"; the plan
+Calebe's own framing going in was to "walk a little steadier"; the plan
 (written via `EnterPlanMode`, approved before any production-touching
 action) split the work into a fully offline, zero-risk Phase A (download,
 migrate into a *test* Postgres copy, verify thoroughly) and a short,
