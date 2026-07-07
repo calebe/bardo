@@ -9,7 +9,9 @@ code exists — get made deliberately, rather than discovered piecemeal the
 way account deletion and feedback each surfaced real design questions mid-
 build. Updated 2026-07-07, same day as first written, after a much longer
 design conversation stress-tested the original four decisions against a
-concrete example and found real consequences worth recording properly.
+concrete example and found real consequences worth recording properly —
+then updated again the same day once more, after settling the attestation
+schema field by field against the real VC spec.
 
 ---
 
@@ -153,6 +155,13 @@ or null if root), a non-transferability constraint.
 Attestation adds: the claim content itself, and an optional `reference` (a
 hash/id of whatever external artifact or event is being attested to).
 
+*(For attestation, these map onto the concrete VC-compliant schema below:
+`subject` → `credentialSubject`, issued-at/expiry → `validFrom`/
+`validUntil`, and `reference` lives as a conventional key inside
+`credentialSubject`'s free-form claim content, not a separate top-level
+field. Delegation's own concrete field types are still future work, deferred
+along with delegation itself.)*
+
 **Why `kind` is included at all, given Bardo never reads it:** it isn't for
 Bardo — it's for whoever verifies the document later, since there's no
 Bardo standing by at that point to explain how to interpret an unfamiliar
@@ -185,10 +194,14 @@ explicitly: **UCAN** for delegation (the attenuation model — narrow-only
 capability chains — is UCAN's core idea, not ours) and **W3C Verifiable
 Credentials** for attestation (issuer signs a claim about a subject,
 verifiable without a callback — precisely what "attestation" already meant
-here). Notably, the revocation approach settled on independently (a cached,
-periodically-refreshed status list) already exists as a real VC spec
-(Bitstring Status List, formerly StatusList2021) — arrived at the same
-answer a standards body converged on, without copying it.
+here). Notably, the revocation *idea* settled on independently — check a
+cached, periodically-refreshed status, never synchronously per verification
+— is the same problem VC's Bitstring Status List (formerly StatusList2021)
+solves. The specific mechanism diverges, though (settled later, field by
+field, below): Bitstring Status List's positional/pre-allocated-bitstring
+design exists for a privacy property not load-bearing enough here to justify
+the extra machinery, so `credentialStatus` ends up a simpler, honestly-
+labeled direct id lookup, not a real Bitstring Status List entry.
 
 Lean: adopt the real wire formats rather than keep a bespoke one that
 happens to converge on the same ideas — but only the fraction that's
@@ -198,9 +211,12 @@ actually load-bearing, not the full breadth of either spec:
   specific capability vocabulary, not the machinery for hosting everyone
   else's.
 - **Skip** full JSON-LD processing for VCs (context resolution, semantic-
-  web tooling) — famously the heavy, error-prone part of implementing VCs;
-  a simplified JWT-based VC profile exists specifically so implementers can
-  avoid this.
+  web tooling) — famously the heavy, error-prone part of implementing VCs.
+  Two real routes exist to avoid it: a JWT-based enveloping-proof profile,
+  or a Data Integrity cryptosuite that canonicalizes via plain JSON instead
+  of RDF. Settled later, below: the latter (`eddsa-jcs-2022`) — an embedded
+  `proof` object fits the rest of this model better than wrapping the whole
+  document in a JWT envelope.
 - **Skip** selective disclosure / zero-knowledge proof schemes (BBS+
   signatures) — genuinely useful elsewhere, irrelevant to anything designed
   here so far.
@@ -208,10 +224,15 @@ actually load-bearing, not the full breadth of either spec:
   `did:key`-style (the public key encoded directly as the identifier, no
   external registry or resolution step), consistent with not adding any
   external dependency Bardo has to trust.
+- **Skip** Bitstring Status List's positional/pre-allocated-index mechanism
+  specifically — kept only the general idea of cached, non-synchronous
+  revocation checking, not the actual bitstring construction (settled
+  below, under the attestation schema's `credentialStatus`).
 - **Keep**, genuinely (not just "in spirit," a real subset an actual UCAN/VC
   verifier library could still check): the core attenuation/proof-chain
-  structure from UCAN, and the issuer-signs-claim-about-subject model plus
-  status-list revocation from VC.
+  structure from UCAN, and the issuer-signs-claim-about-subject model from
+  VC. Revocation keeps VC's general cached-status shape, but not Bitstring
+  Status List's specific mechanism (see the Skip list above).
 
 ## Worked example: a non-transferable voucher, redeemed at a third party
 
@@ -241,26 +262,107 @@ party who has no direct relationship with Bardo at all.
 
 ---
 
-## Still open, reordered now that attestation is confirmed as v1
+## Attestation schema v1 — field by field, VC-compliant
 
-- **Concrete attestation schema — exact field types**, not just the
-  conceptual shape (decision 4b's list). Next up: it's the direct,
-  concrete follow-on to "attestation ships first," and it's a real
-  prerequisite for the item below, since revocation's exact cryptographic
-  construction needs to know precisely what's being hashed.
-- Exact revocation-list endpoint/mechanism design (a real Bitstring-
-  Status-List-style implementation, or something simpler to start) —
-  blocking regardless of kind, since every document needs this to be a
-  usable v1.
+Concrete fields for the attestation kind, resolved one at a time against the
+real W3C Verifiable Credentials Data Model v2.0. A document built through our
+own tooling is a genuinely valid VC, not just VC-inspired — every VC-required
+field is present; only the *allowed values* within some of them are narrowed,
+for our own stated reasons. Only `type`, `issuer`, `credentialSubject`, and
+`proof` are actually required by the spec — `id`, `validFrom`, `validUntil`,
+`credentialStatus` are all optional there. Several of the optional ones are
+included anyway, for reasons spelled out below, not because VC forces it.
+
+- **`@context`** — fixed, `https://www.w3.org/ns/credentials/v2`. Required
+  for the document to be well-formed VC-JSON, but not something processed
+  on our end — no JSON-LD term expansion, no semantic-web tooling (the
+  "skip full JSON-LD processing" line already drawn above). Present for
+  conformance and so other VC-aware tooling recognizes the vocabulary;
+  otherwise inert for us.
+- **`type`** — fixed, `["VerifiableCredential"]` only. VC allows appending
+  narrower type strings (`"OpenBadgeCredential"`-style), but each one is a
+  JSON-LD term that only means something with a real `@context` definition
+  behind it — exactly the JSON-LD machinery being skipped. `kind`
+  (`attestation` / `delegation`) stays a plain field of our own outside
+  VC's type system, rather than an undefined term smuggled into `type`.
+- **`issuer`** — a plain `did:key` string. VC also allows an object form
+  (`{ id, name, description }`), but a human-facing label on an issuer is
+  the same "external party curating identity" smell DESIGN.md §1 already
+  warns about, aimed at the issuer's own identity this time. Plain key,
+  nothing else.
+- **`credentialSubject`** — merged claim shape: an optional `id` (the
+  `did:key` the claim is about) plus free-form claim content. The spec
+  requires "one or more claims" but doesn't define what counts as one; a
+  bare `id` alone — "this document is about its signer, did:key:foo" — is
+  itself a real, minimal, self-referential claim, not nothing. Claim
+  content beyond that is deliberately left unstructured: attestation exists
+  precisely to cover arbitrary claim types (provenance, witness,
+  commitment, contract), and standardizing its shape now would undercut
+  that.
+- **`id`** — `ni:///sha-256;<base64url digest>` (RFC 6920 "named
+  information" URIs — a real standard for turning a hash into a URI; empty
+  authority means "no resolution party, verify locally," consistent with
+  everything else here being self-verifying). The digest covers the full
+  canonical payload minus `id`/`proof` themselves (neither exists yet at
+  hash time), plus a dedicated nonce field. The nonce exists specifically
+  to guarantee uniqueness — hashing only naturally-varying fields risks two
+  genuinely different documents colliding on identical input if those
+  fields happen to match. Hashing broadly, not just the nonce, is a
+  separate concern from uniqueness: it makes `id` a real commitment to the
+  whole document's content, which is what lets revocation authority be
+  checked cryptographically (decision 5) instead of looked up.
+- **`validFrom`** — always set, to issuance time. VC allows a future start
+  date, but attestation doesn't need a delayed-start feature (that's a
+  delegation-widening concern, deferred along with delegation itself).
+- **`validUntil`** — optional, issuer's choice per document. Omitted means
+  "does not expire" — some attestations (the minimal self-referential
+  example above) have no natural expiry at all.
+- **`credentialStatus`** — deliberately *not* a real Bitstring Status List
+  entry, despite that being the spec's own revocation mechanism and the one
+  named under "Standards" above. The real mechanism's positional-bitstring
+  design exists for a specific privacy property — checking one bit in a
+  downloaded bitstring hides *which* credential is being checked from
+  whoever hosts the list — which requires pre-allocating every credential
+  an index into one shared bitstring. That's real infrastructure Bardo
+  doesn't need, and decision 5 already argues against keeping more state
+  than a bare revoked-id set. So: direct id lookup instead —
+  `{ id: <URL to check>, type: "BardoRevocationCheck" }` — honestly
+  labeled as our own simpler mechanism rather than borrowing the real
+  spec's type name, which would promise positional-bitstring semantics not
+  actually provided. Chosen with the trade-off explicit: Bardo still
+  doesn't store which document was checked, but a direct-lookup design does
+  reveal the specific id being asked about to whoever serves the check,
+  unlike the real bitstring approach.
+- **`proof`** — Data Integrity, cryptosuite `eddsa-jcs-2022`: Ed25519 (no
+  new crypto, decision 2) over a JCS-canonicalized (RFC 8785) payload — the
+  real, standard version of "sign our own fixed deterministic JSON
+  serialization," plain-JSON canonicalization rather than the RDF/JSON-LD
+  canonicalization most other Data Integrity cryptosuites require. Fields:
+  `type: "DataIntegrityProof"`, `cryptosuite: "eddsa-jcs-2022"`, `created`,
+  `verificationMethod` (the signer's `did:key` plus a `#`-fragment key id),
+  `proofPurpose: "assertionMethod"`, `proofValue` (base58-btc multibase
+  Ed25519 signature). `verificationMethod`/`proofPurpose` are fixed
+  defaults our own tooling is opinionated about, not protocol-enforced — an
+  agent hand-constructing a payload outside our tooling remains free to
+  diverge, same as every other field (see "protocol, not enforced schema"
+  above).
+
+---
+
+## Still open
+
+- Exact revocation-check endpoint shape — the *mechanism* is settled
+  (direct id lookup against Bardo's bare revoked-id set, not a Bitstring
+  Status List), but the actual request/response shape isn't designed yet.
 - Witness/co-sign mechanics — likely *already* answered as a side effect
-  of a well-designed attestation schema, not a separate mechanism: if the
-  schema properly supports referencing a shared external claim, "multiple
-  independent attestations pointing at the same reference" is witnessing,
-  free. Worth confirming once the schema is drafted, not a dedicated
-  design question on its own.
+  of the schema above (a shared `reference` inside `credentialSubject`'s
+  claim content), not a separate mechanism. Worth confirming, not a
+  dedicated design question on its own.
 - Commitment/contract semantics beyond "two cross-referencing attestations"
   — vaguest part of the original framing, least urgent to resolve.
 - The `bardo_issue_document` convenience tool — depends on the schema
-  above being settled first.
+  above (now settled) plus its own per-field filling guidance, which
+  belongs in the tool's own description/docstring (agents read that at
+  call time, not a standalone doc) rather than a separate markdown file.
 - Delegation-widening mechanics (decision 3) — deferred along with
   delegation itself now that it isn't v1.
