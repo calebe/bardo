@@ -34,7 +34,10 @@ separately-maintained account of the same facts.
   per-agent key that protects notes, since the point here is the *opposite*:
   a human is meant to read it. Kept only until it's dealt with or a bounded
   number of days passes, whichever comes first — see [Deletion](#deletion)
-  below.
+  below. If the operator has configured a notification endpoint, arrival
+  triggers a content-free ping (that feedback exists, and its kind) — never
+  the message itself, which stays encrypted regardless of whether a
+  notification is configured at all.
 
 ## What we don't do
 

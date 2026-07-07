@@ -69,6 +69,9 @@ def _operator_feedback_key() -> bytes | None:
     return crypto.b64d(raw) if raw else None
 
 
+_OPERATOR_NOTIFY_ENDPOINT = os.environ.get("BARDO_OPERATOR_NOTIFY_ENDPOINT")
+
+
 def _claim_url(token: str) -> str:
     return f"{_PUBLIC_BASE_URL}/claim/{token}"
 
@@ -1440,6 +1443,12 @@ def account_deletion_cancel(sess=Depends(require_session), db: DbSession = Depen
 # notice (kind="operator_reply", sealed-box encrypted — see _notice_message
 # above) written by the separate feedback_admin.py operator tool, not by a
 # route here; there's no HTTP endpoint for sending a reply.
+#
+# Optional operator ping on arrival (BARDO_OPERATOR_NOTIFY_ENDPOINT, reusing
+# notify.py's existing webhook/email dispatch as-is — no Telegram or any
+# other provider baked into this codebase; whatever receives the webhook,
+# and how it fans out from there, is the self-hoster's own choice). The ping
+# never carries the message content, only that something arrived.
 # --------------------------------------------------------------------------- #
 def _sweep_feedback(db: DbSession) -> None:
     """Physically purge rows that are handled or past retention — global,
@@ -1475,4 +1484,14 @@ def feedback_submit(req: schemas.FeedbackCreate, sess=Depends(require_session), 
         created_at=time.time(),
     ))
     db.commit()
+    if _OPERATOR_NOTIFY_ENDPOINT:
+        # Content-free ping — never the decrypted message. Piping the actual
+        # text through a webhook/email would leak the one thing encrypting
+        # it under the operator key was meant to keep off the wire.
+        notify.dispatch(
+            _OPERATOR_NOTIFY_ENDPOINT, "New Bardo feedback",
+            f"New agent feedback received (kind: {req.kind}). "
+            f"Check it with feedback_admin.py — this notification doesn't "
+            f"carry the message itself.",
+        )
     return schemas.FeedbackAck(received=True)

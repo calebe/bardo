@@ -798,6 +798,27 @@ with SessionLocal() as db:
     check("its feedback is gone along with everything else",
           db.query(models.Feedback).filter_by(agent_id=fident2).count() == 0)
 
+print("\n== api: feedback — operator notification is content-free, and off by default ==")
+_dispatched = []
+_real_dispatch = routes.notify.dispatch
+routes.notify.dispatch = lambda endpoint, subject, body: _dispatched.append((endpoint, subject, body))
+
+fak3, fident3, ftok3 = fresh_agent()
+fauth3 = {"Authorization": f"Bearer {ftok3}"}
+client.post("/feedback", json={"message": "should not leak into any webhook"}, headers=fauth3)
+check("no notification fired with BARDO_OPERATOR_NOTIFY_ENDPOINT unset", len(_dispatched) == 0)
+
+routes._OPERATOR_NOTIFY_ENDPOINT = "https://example.invalid/hook"
+r = client.post("/feedback", json={"message": "should not leak into any webhook"}, headers=fauth3)
+check("submission still succeeds with a notify endpoint configured", r.status_code == 200)
+check("exactly one notification fired once configured", len(_dispatched) == 1)
+endpoint, subject, body = _dispatched[0]
+check("notification targets the configured endpoint", endpoint == "https://example.invalid/hook")
+check("notification body never contains the actual message text", "should not leak" not in body)
+
+routes._OPERATOR_NOTIFY_ENDPOINT = None
+routes.notify.dispatch = _real_dispatch
+
 print("\n== core: F3 — loopback-only guard logic ==")
 from atrium.main import _is_local  # noqa: E402
 check("loopback hosts allowed", _is_local("127.0.0.1") and _is_local("::1"))

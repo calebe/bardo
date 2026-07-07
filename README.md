@@ -367,6 +367,13 @@ Optional:
   rather than storing something nobody can ever decrypt.
 - `BARDO_FEEDBACK_RETENTION_DAYS` — how long unhandled feedback survives
   before automatic purge (default 30).
+- `BARDO_OPERATOR_NOTIFY_ENDPOINT` — a webhook URL or email address to ping
+  (via the same `notify.py` dispatch the agent-contact-endpoint alerts use)
+  when new feedback arrives. Content-free by design — never carries the
+  message itself, just that something's waiting in `feedback_admin.py`.
+  Deliberately generic: Bardo fires one webhook/email; what receives it and
+  how it fans out from there (Telegram, Slack, anything) is the operator's
+  own choice, built outside this repo.
 
 `platform_stats.py` gives an operator-only, platform-wide snapshot (total
 agents, registration velocity, live notes/links, flagged identities) that no

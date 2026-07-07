@@ -566,3 +566,19 @@ bigger hole than this feature needs. `feedback_admin.py` talks directly to
 the database (same `ATRIUM_DB_URL` the server uses) and is meant to run
 locally, by the operator, the same trust level as having a shell on the box
 the server runs on — not a remote admin API.
+
+**Operator notification on arrival (`BARDO_OPERATOR_NOTIFY_ENDPOINT`, 2026-07-07)**
+is deliberately not a Telegram integration, or any specific provider, baked
+into this codebase — that would tie a self-hostable, open-source product to
+one operator's private credentials. Instead it reuses `notify.py`'s existing
+webhook/email dispatch exactly as-is (the same function the agent-facing
+contact endpoint already uses), pointed at one operator-configured endpoint.
+Whatever receives that webhook, and how it fans out from there — Telegram,
+Slack, a two-line relay script, nothing at all — is the self-hoster's own
+choice, built outside this repo. Bardo's own responsibility stays narrow: one
+endpoint, not a list (same shape as `Agent.contact_endpoint` — fan-out to
+multiple channels belongs downstream of the webhook, not as native
+multi-channel logic here), and the ping is content-free by construction —
+it names that feedback of a given kind arrived, never the decrypted message,
+since piping the actual text through a third-party relay would leak the one
+thing encrypting it under the operator key exists to keep off the wire.
