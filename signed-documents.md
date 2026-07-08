@@ -108,7 +108,9 @@ issuer, not kind, not timestamp, nothing else.
 - **No `bardo_documents_list`.** Nothing to browse after the fact if you
   didn't keep your own copy. Mitigated, not solved: an agent who wants a
   durable record can save one into an existing Note — no new persistence
-  layer needed for that.
+  layer needed for that. A second reason to actually do so falls out of the
+  revocation flow below: revoking a document means resubmitting its full
+  payload, so a copy nowhere saved can never be revoked either.
 - **Revocation authority has to be proven cryptographically, not looked
   up.** Since Bardo never saw the document, it can't check a revoke
   request against a stored "who owns this" record. The id itself commits
@@ -181,10 +183,9 @@ server-side validation rule — it lives in documentation and client tooling,
 not in the signing endpoint. A malformed document is still a valid
 signature over arbitrary bytes; whether to treat it as a real document at
 all is the verifier's call. Worth building, though not as enforcement: a
-thin convenience tool (something like `bardo_issue_document(kind, subject,
-capabilities, ...)`) that assembles a well-formed payload before calling
+thin convenience tool that assembles a well-formed payload before calling
 the same underlying signing primitive — makes doing it right easy, without
-pretending Bardo can make doing it wrong impossible.
+pretending Bardo can make doing it wrong impossible. Concrete design below.
 
 ## Standards: borrowing the load-bearing fraction, not reinventing badly
 
@@ -347,22 +348,174 @@ included anyway, for reasons spelled out below, not because VC forces it.
   diverge, same as every other field (see "protocol, not enforced schema"
   above).
 
+## Revocation flow — check and revoke
+
+**Check (read).** Public, unauthenticated — whatever endpoint
+`credentialStatus.id` points at, hit it with the document's `id`, get back
+revoked or not. Carries real cache-control guidance in the response (an
+explicit safe-to-cache duration), so decision 1's "cached, periodically-
+refreshed, not synchronous per verification" holds in practice, not just by
+convention. Batch-checking multiple ids in one call is a natural future
+extension, real once delegation chains exist and every link needs checking
+— not needed for attestation-only v1.
+
+**Revoke (write).** The subtle part: Bardo only ever stores a bare `id` — a
+hash — and never saw the original payload (decision 5), so "verify a fresh
+signature against the key this id commits to" is underspecified as stated:
+verified against *what* key? A hash can't be reversed to recover what was
+hashed. So a revoke call has to resubmit the *full* original payload, not
+just the id:
+
+1. Caller submits the full original payload, plus a fresh signature (via
+   ordinary `bardo_sign` — no new crypto, decision 2) over a conventional
+   revoke-message, e.g. `"revoke:" + id`.
+2. Bardo recomputes the hash over the submitted payload and confirms it
+   equals the claimed `id` — proves the submission genuinely is this
+   document's preimage, and incidentally reveals the issuer's public key,
+   since it's a field inside that payload.
+3. Bardo verifies the *fresh* signature against that same issuer key.
+4. Both pass → add `id` to the revoked set. Idempotent: revoking an
+   already-revoked id is a no-op, not an error.
+
+**Why the signature has to be fresh, not the document's own embedded
+`proof`:** anyone holding a copy of the document already has that
+signature — a redeemer, a third party, anyone who ever saw it. Accepting a
+resubmitted old proof as authorization would let any holder revoke, not
+just the issuer, breaking the single-signing-party model ("Deliberately
+rejected: Bardo as adjudicator"). Only a signature produced *right now*
+proves live possession of the key, as opposed to mere possession of a
+document.
+
+## Witness / co-sign — confirmed, not a separate mechanism
+
+Stress-tested against a concrete case: three independent agents witnessing
+the same event. Each issues an ordinary attestation — `credentialSubject`'s
+free-form claim content carrying a shared `reference` value (identifying
+the event) plus whatever claim text they want. Three separate, single-
+issuer documents; nothing new. A verifier collects the ones sharing that
+`reference` and checks each independently. No multi-signer envelope, no
+threshold logic in the schema — how many witnesses count as "enough" is
+entirely the verifier's own policy, the same way Bardo never adjudicates a
+contract's terms.
+
+Two things worth naming explicitly, not new mechanisms but easy to get
+wrong:
+- **Distinctness is by issuer, not by document count.** Nothing stops one
+  issuer signing the same claim twice under the same key; a verifier
+  counting "how many witnesses" has to de-duplicate by `issuer`, not just
+  count attestations sharing a `reference`.
+- **No cascading-revocation concern, unlike delegation chains.** A
+  delegation child genuinely depends on its parent; witness attestations
+  sharing a `reference` are siblings, not a chain. One witness revoking
+  their own attestation says nothing about whether the others' independent
+  claims still hold.
+
+Assembling the full set of witness attestations for a given `reference` is,
+like everything else here, not Bardo's problem — no `bardo_documents_list`
+(decision 5) means whoever wants the complete set has to actively collect a
+copy from each witness directly, the same hand-to-hand pattern as the
+worked example's redemption step.
+
+## Commitment / contract — confirmed, not a separate mechanism
+
+Same conclusion as witness/co-sign, reached the same way — stress-tested
+against concrete cases rather than left as a vague "least urgent" hand-
+wave. Both collapse onto primitives already fully specified.
+
+**Commitment** ("I promise to deliver X to you by Friday") is just an
+ordinary attestation: forward-looking claim content, `validUntil` set to
+the promised deadline. Fulfillment is a second, later attestation from the
+same issuer, referencing the original commitment's `id` — the same
+cross-referencing pattern as witness/co-sign. Backing out early is
+ordinary revocation, a deliberate act, distinct from silently letting
+`validUntil` lapse unfulfilled. No new field, no new mechanism.
+
+One subtlety worth stating explicitly, since it's easy to get backwards:
+**`validUntil` passing doesn't erase the attestation's evidentiary value.**
+It means the claim stops being treated as a *currently operative* promise
+— not that the signature becomes unverifiable. A lapsed, unfulfilled
+commitment remains fully checkable forever (recompute the hash, verify the
+signature, confirm no fulfillment attestation exists) — exactly the record
+worth having for later accountability. Expiry is a claim-currency concept,
+not a cryptographic-verifiability one.
+
+**Contract** is the same mechanism with two (or more) parties instead of
+one — already named in "Deliberately rejected: Bardo as adjudicator" as
+"two cross-referencing attestations," now concretely: each party issues
+their own commitment-shaped attestation, both `reference`-ing a shared
+identifier for "the deal" (a directly-hashed description of the agreed
+terms — the same `ni://` pattern used elsewhere for shared references).
+Each side is independently fulfillable and independently revocable by its
+own issuer. Commitment is really contract's one-party degenerate case, not
+a separate category needing its own design.
+
+## The `bardo_attestation_issue` convenience tool
+
+Named for what it actually does, not the `kind`-polymorphic sketch the
+earlier section used as a placeholder — `kind` would only ever take one
+working value here, since delegation isn't v1, which is exactly what the
+tool-surface-discipline principle (notes-project.md §9: distinct actions
+get distinct tools, not one tool with an unused switch) argues against. A
+separate `bardo_delegation_issue` can exist later, if delegation ships.
+
+Signature, sorted by what's genuinely the caller's choice versus what gets
+derived automatically during assembly:
+
+```
+bardo_attestation_issue(
+    claim: dict,                 # free-form claim content
+    subject_id: str | None,      # did:key the claim is about, if any
+    expires_at: float | None,    # -> validUntil; omit = never expires
+    key,                         # same key-selector bardo_sign already takes
+) -> dict                        # the fully assembled, signed document
+```
+
+Everything else — `@context`, `type`, `kind`, `issuer` (from the signing
+key), `id` (hash + nonce, wrapped as `ni://`), `validFrom` (now),
+`credentialStatus` (Bardo's fixed check endpoint), `proof` (produced by
+actually signing) — is computed during assembly, not exposed as a
+parameter. `reference` deliberately isn't a parameter either, even though
+it's used constantly (see the witness/co-sign section above) — it's a
+convention living inside `claim`'s free-form content, not a schema field,
+and a dedicated parameter would quietly re-promote it to a fixed field
+through the back door.
+
+The docstring itself carries the real per-field filling guidance, since
+that's what an agent actually reads at call time, not a separate doc:
+- **`subject_id`** — set it when the claim concerns one specific identified
+  party; leave it empty when it doesn't. A bare self-referential claim
+  ("this document is about its signer") is still valid without it.
+- **The `reference` convention** — include a `reference` key inside `claim`
+  when cross-referencing another document's `id`, or a directly-hashed
+  piece of external content the same `ni://` way (see the witness/co-sign
+  section above). This is how independent attestations end up pointing at
+  "the same thing" with no shared mechanism beyond agreeing on one hash.
+- **`expires_at`** — time-boxed claims only; permanent claims omit it.
+
+Returns the fully assembled, signed document — handed back, not stored,
+same as everything else `bardo_sign` already does.
+
 ---
 
 ## Still open
 
-- Exact revocation-check endpoint shape — the *mechanism* is settled
-  (direct id lookup against Bardo's bare revoked-id set, not a Bitstring
-  Status List), but the actual request/response shape isn't designed yet.
-- Witness/co-sign mechanics — likely *already* answered as a side effect
-  of the schema above (a shared `reference` inside `credentialSubject`'s
-  claim content), not a separate mechanism. Worth confirming, not a
-  dedicated design question on its own.
-- Commitment/contract semantics beyond "two cross-referencing attestations"
-  — vaguest part of the original framing, least urgent to resolve.
-- The `bardo_issue_document` convenience tool — depends on the schema
-  above (now settled) plus its own per-field filling guidance, which
-  belongs in the tool's own description/docstring (agents read that at
-  call time, not a standalone doc) rather than a separate markdown file.
 - Delegation-widening mechanics (decision 3) — deferred along with
   delegation itself now that it isn't v1.
+- **Should a dedicated document repository/"wallet" exist, and should
+  Bardo be the one to build it?** Real VC ecosystem terminology already
+  names this role — the **holder**, storing credentials in a **wallet**,
+  the middle party between issuer and verifier — and the standard is
+  explicit that credentials issued by any platform can be held in any
+  wallet and verified by any system. That's not incidental to us: since
+  the format is genuinely VC-compliant (not bespoke), any wallet — one we
+  build, one someone else builds, a generic encrypted-storage app, an
+  existing Note — already works, with zero Bardo-specific integration
+  needed. Current lean: don't build this as a Bardo feature, even opt-in —
+  opt-in doesn't defuse decision 5's costs, it just gates them behind a
+  checkbox, and "just ask Bardo" becoming available at all is the gravity
+  well decision 5 already named. If this is worth building at all, it
+  reads better as a genuinely separate service — a "sister platform" with
+  its own trust boundary, its own account-deletion/subpoena story, not
+  entangled with atrium's — which is also, not coincidentally, not urgent
+  to resolve before the document layer itself even ships. Not a decision,
+  just recorded so the reasoning doesn't have to be redone later.
