@@ -468,6 +468,42 @@ check("unpinning one frees a slot", r.status_code == 200)
 r = client.post("/notes", json={"text": "now there's room", "pinned": True}, headers=pinauth)
 check("pinning again after freeing a slot succeeds", r.status_code == 200)
 
+print("\n== api: notes — locked blocks edits/deletes except locked itself (§2) ==")
+plain_id = client.post("/notes", json={"text": "lock me later"}, headers=nauth).json()["id"]
+check("locked defaults false", client.get(f"/notes/{plain_id}", headers=nauth).json()["locked"] is False)
+
+lock_id = client.post("/notes", json={"text": "vault: document payload", "locked": True}, headers=nauth).json()["id"]
+check("note_add can create-and-lock in one call", client.get(f"/notes/{lock_id}", headers=nauth).json()["locked"] is True)
+
+r = client.patch(f"/notes/{lock_id}", json={"title": "renamed"}, headers=nauth)
+check("metadata edit on a locked note -> 423", r.status_code == 423)
+r = client.patch(f"/notes/{lock_id}", json={"text": "overwritten"}, headers=nauth)
+check("text edit on a locked note -> 423", r.status_code == 423)
+r = client.patch(f"/notes/{lock_id}", json={"pinned": True}, headers=nauth)
+check("pinning a locked note -> 423", r.status_code == 423)
+r = client.delete(f"/notes/{lock_id}", headers=nauth)
+check("deleting a locked note -> 423", r.status_code == 423)
+r = client.get(f"/notes/{lock_id}", headers=nauth)
+check("note survives every rejected attempt, unchanged", r.json()["text"] == "vault: document payload")
+check("title also untouched by the rejected attempt", r.json()["title"] is None)
+
+r = client.patch(f"/notes/{lock_id}", json={"locked": False, "title": "sneak this in too"}, headers=nauth)
+check("unlock combined with another field in one call is still rejected", r.status_code == 423)
+
+r = client.patch(f"/notes/{lock_id}", json={"locked": False}, headers=nauth)
+check("bare locked=false unlocks", r.status_code == 200 and r.json()["locked"] is False)
+r = client.patch(f"/notes/{lock_id}", json={"title": "renamed after unlock"}, headers=nauth)
+check("edit succeeds once unlocked", r.status_code == 200 and r.json()["title"] == "renamed after unlock")
+
+r = client.patch(f"/notes/{plain_id}", json={"text": "final wording", "locked": True}, headers=nauth)
+check("a final text edit can lock in the same call", r.status_code == 200 and r.json()["locked"] is True)
+relock_id = r.json()["id"]
+r = client.delete(f"/notes/{relock_id}", headers=nauth)
+check("newly-locked note (new version) also blocks delete", r.status_code == 423)
+client.patch(f"/notes/{relock_id}", json={"locked": False}, headers=nauth)
+r = client.delete(f"/notes/{relock_id}", headers=nauth)
+check("delete succeeds after unlocking", r.status_code == 200)
+
 print("\n== api: notes — hard cap rejects new notes past the limit (§7/§8) ==")
 from atrium.api import schemas as _schemas
 _, _, captok2 = fresh_agent()  # fresh agent so the tiny test cap starts from zero

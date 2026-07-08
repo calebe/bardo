@@ -731,6 +731,7 @@ def _note_view(db: DbSession, n: models.Note, spirit_seed: bytes) -> schemas.Not
         snippet=_ensure_snippet(db, spirit_seed, n),
         tags=_decode_tags(spirit_seed, n.tags, n.tags_encrypted),
         pinned=n.pinned,
+        locked=n.locked,
         created_at=n.created_at,
     )
 
@@ -879,6 +880,34 @@ def _resolve_pinned(db: DbSession, agent_id: str, old: models.Note, requested: b
     return requested
 
 
+def _resolve_locked(old: models.Note, requested: bool | None) -> bool:
+    """Carry forward unchanged if omitted — same rule as pinned. No cap to
+    check either direction; `_reject_if_locked` is what makes locking mean
+    anything, not this."""
+    return old.locked if requested is None else requested
+
+
+def _touches_non_lock_fields(req: schemas.NoteUpdate) -> bool:
+    return any([
+        req.text is not None, req.append_text is not None, req.find is not None,
+        req.title is not None, req.summary is not None, req.tags is not None,
+        req.pinned is not None, bool(req.clear),
+    ])
+
+
+def _reject_if_locked(n: models.Note, req: schemas.NoteUpdate) -> None:
+    """While a note is locked, note_update accepts a bare `locked=` change
+    and nothing else — every other field in the same request is rejected
+    outright, not just discouraged. Unlock (its own call), then edit, as two
+    deliberate steps; the note's `locked` state at the *start* of this call
+    is what's checked, so unlocking and editing in one request still fails —
+    no ambiguity about which half applies first."""
+    if n.locked and _touches_non_lock_fields(req):
+        raise HTTPException(
+            423, "note is locked; call note_update with only locked=false to unlock before editing"
+        )
+
+
 def _make_snippet_blob(sess, text_plain: str, summary_blob: bytes | None) -> bytes:
     source = crypto.decrypt_note_summary(sess.spirit_seed, summary_blob) if summary_blob else text_plain
     return crypto.encrypt_note_snippet(sess.spirit_seed, notes_logic.make_snippet(source))
@@ -952,6 +981,7 @@ def note_add(req: schemas.NoteCreate, sess=Depends(require_session), db: DbSessi
         title=title_b, summary=summary_b, snippet=snippet_b,
         tags=tags_b, tags_encrypted=tags_enc,
         pinned=req.pinned,
+        locked=req.locked,
         created_at=time.time(),
     )
     db.add(n)
@@ -993,6 +1023,7 @@ def notes_list(
                 snippet=_ensure_snippet(db, sess.spirit_seed, n),
                 tags=_decode_tags(sess.spirit_seed, n.tags, n.tags_encrypted),
                 pinned=n.pinned,
+                locked=n.locked,
                 created_at=n.created_at,
                 links=links, total_links=total_links,
             ))
@@ -1029,6 +1060,7 @@ def note_get(
             snippet=_ensure_snippet(db, sess.spirit_seed, n),
             tags=_decode_tags(sess.spirit_seed, n.tags, n.tags_encrypted),
             pinned=n.pinned,
+            locked=n.locked,
             created_at=n.created_at,
             text=sliced, total_length=total_length, offset=offset, length_returned=len(sliced),
             links=links, total_links=total_links, links_offset=links_offset,
@@ -1080,12 +1112,15 @@ def note_update(note_id: str, req: schemas.NoteUpdate, sess=Depends(require_sess
     if text_modes == 0:
         # Metadata-only: resolve forward to head, no OCC (§4 — not versioned).
         n = _owned_note_visible(db, sess, note_id)
+        _reject_if_locked(n, req)
         _rate_limited_write(sess.identifier)
         title_b, summary_b, tags_b, tags_enc = _compute_metadata(db, sess, agent, n, req)
         pinned = _resolve_pinned(db, sess.identifier, n, req.pinned)
+        locked = _resolve_locked(n, req.locked)
         current_text = crypto.decrypt_note(sess.spirit_seed, n.text)
         n.title, n.summary, n.tags, n.tags_encrypted = title_b, summary_b, tags_b, tags_enc
         n.pinned = pinned
+        n.locked = locked
         n.snippet = _make_snippet_blob(sess, current_text, summary_b)
         db.commit()
         db.refresh(n)
@@ -1103,6 +1138,7 @@ def note_update(note_id: str, req: schemas.NoteUpdate, sess=Depends(require_sess
             "message": "a newer version already exists; re-read it before retrying",
             "current_head": _note_view(db, current_head, sess.spirit_seed).model_dump(),
         })
+    _reject_if_locked(n, req)
     _rate_limited_write(sess.identifier)
 
     current_text = crypto.decrypt_note(sess.spirit_seed, n.text)
@@ -1122,6 +1158,7 @@ def note_update(note_id: str, req: schemas.NoteUpdate, sess=Depends(require_sess
 
     title_b, summary_b, tags_b, tags_enc = _compute_metadata(db, sess, agent, n, req)
     pinned = _resolve_pinned(db, sess.identifier, n, req.pinned)
+    locked = _resolve_locked(n, req.locked)
     new_version = models.Note(
         agent_id=sess.identifier,
         public_id=_new_public_id(),
@@ -1130,6 +1167,7 @@ def note_update(note_id: str, req: schemas.NoteUpdate, sess=Depends(require_sess
         snippet=_make_snippet_blob(sess, new_text, summary_b),
         tags=tags_b, tags_encrypted=tags_enc,
         pinned=pinned,
+        locked=locked,
         supersedes=n.id, superseded_by=None,
         created_at=time.time(),
     )
@@ -1147,6 +1185,8 @@ def note_update(note_id: str, req: schemas.NoteUpdate, sess=Depends(require_sess
 def note_delete(note_id: str, sess=Depends(require_session), db: DbSession = Depends(get_db)):
     agent = _load_agent(db, sess.identifier)
     n = _owned_note_visible(db, sess, note_id)
+    if n.locked:
+        raise HTTPException(423, "note is locked; unlock it first via note_update(note_id, locked=False)")
     _rate_limited_write(sess.identifier)
     pol = resolve_policy(db, agent, sess.spirit_seed)
     n.pending_delete_at = time.time() + pol.delete_grace_seconds

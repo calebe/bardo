@@ -30,7 +30,7 @@ not a default — applied here to *meaning* rather than *identity*.
 ## 2. Entry (note) shape
 
 ```
-{id, text, title?, summary?, snippet, tags?, pinned?, created_at}
+{id, text, title?, summary?, snippet, tags?, pinned?, locked?, created_at}
 ```
 
 **Encryption, per field.** [decided] `text`, `title`, `summary`, and `snippet`
@@ -118,6 +118,21 @@ structural metadata than content.
   depth and link fan-out. Surfaced by the dashboard (§7), not `notes_list`:
   dashboard's whole job is "get oriented in one call," and "where do I
   start reading" belongs there, not in an ordinary paginated browse.
+- **locked** — optional boolean, agent-authored, same structural-flag
+  category as `pinned` (not versioned, mutable in place, no OCC) — with one
+  difference: while `true`, `note_update` rejects every other field in the
+  same request (text, title, summary, tags, pinned) with a 423, and
+  `note_delete` refuses outright. `locked` itself stays freely settable
+  either way, so unlocking is always a deliberate, separate call, never
+  implicit in the same request that also edits. Motivating case: the
+  signed-document layer's revocation flow needs an issuer's own durable copy
+  of a document's full original payload, since Bardo itself keeps none
+  (signed-documents.md, decision 5); an ordinary note holding that copy is
+  exactly the kind of state a later, differently-sampled instance of the
+  same agent could accidentally overwrite or delete, silently losing the
+  ability to ever revoke. `locked` closes that gap on the existing write
+  paths — one more precondition check, no new persistence layer, no
+  document-aware code here.
 
 ---
 
@@ -387,6 +402,15 @@ free up. Not step-up-gated like a policy loosening — routine note cleanup
 shouldn't carry that much friction; the grace period itself is the safety
 mechanism, not an extra puzzle-solve.
 
+**Locked notes are exempt from the above — no grace period, straight
+rejection.** [decided] `note_delete` on a `locked` note (§2) fails outright
+(423) instead of starting the grace window. The grace period defends against
+*accidental* deletion; a locked note's whole point is state an agent already
+judged too costly to risk even briefly, so the right response to a delete
+attempt is refusal, not a countdown the agent still has to notice and cancel.
+Unlock first (its own `note_update` call), then delete — same two-step
+posture as editing a locked note.
+
 After a grace window elapses with no explicit `note_undelete(id)` call, the
 whole chain is physically, permanently purged. Grace window length: a
 `delete_grace_seconds` field on the same self-binding policy object
@@ -607,6 +631,17 @@ a caller that stores one of those ids and never invokes the forward-walk
 `note_get` applies on top. Same substrate, opposite retrieval default — the
 first real instance of "shared primitives, not shared trust model," rather
 than an assertion of it.
+
+**Second bookmark — `locked` (§2), built once the document layer's own
+revocation flow named a concrete need:** notes want to be fluid, documents
+want to be frozen — this section's opening claim. `locked` doesn't change
+that default; it lets one specific note opt out of it. An issuer's saved
+copy of a document — held only so it can later be resubmitted to prove
+revocation authority (signed-documents.md, decision 5 and "Revocation
+flow") — needs to survive exactly the accidental-edit/delete risk ordinary
+notes are designed to tolerate. Same substrate again: a boolean precondition
+check on the existing write paths, no new persistence, no document-aware
+code in notes.py itself.
 
 ---
 

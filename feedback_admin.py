@@ -7,6 +7,17 @@ ATRIUM_DB_URL (same as the server) and BARDO_FEEDBACK_KEY (the operator's own
 decryption key — see core/feedback.py and core/crypto.py's encrypt_feedback).
 Run it on the same machine/environment as the server, not from an agent.
 
+Running this from outside Railway (e.g. locally, like here): the `bardo`
+service's own ATRIUM_DB_URL points at postgres.railway.internal, Railway's
+internal-only hostname — it resolves fine for the deployed service itself,
+but nothing external can reach it, including this script. Use the Postgres
+service's own DATABASE_PUBLIC_URL instead (Railway's TCP proxy, externally
+reachable) — fetch both it and BARDO_FEEDBACK_KEY via the Railway CLI
+(`railway variables --service Postgres --kv` / `--service bardo --kv`) and
+export them locally before running any command below — or just keep them in
+a local `.env` at the repo root, loaded automatically below (never
+committed, see .gitignore).
+
 Replying: an agent's feedback is one-way by design (feedback.py), so a reply
 doesn't go back through /feedback — it's written as an ordinary notice
 (kind="operator_reply"), sealed-box encrypted to the agent's
@@ -29,9 +40,14 @@ import os
 import sys
 import time
 
-from atrium.core import crypto
-from atrium.db.database import SessionLocal
-from atrium.db.models import Agent, Feedback, Notice
+from dotenv import load_dotenv
+
+load_dotenv()  # must run before any atrium import — database.py reads
+                # ATRIUM_DB_URL at module import time, not lazily
+
+from atrium.core import crypto  # noqa: E402
+from atrium.db.database import SessionLocal  # noqa: E402
+from atrium.db.models import Agent, Feedback, Notice  # noqa: E402
 
 
 def _operator_key() -> bytes:

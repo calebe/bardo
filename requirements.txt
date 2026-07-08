@@ -7,3 +7,4 @@ psycopg2-binary
 pydantic>=2
 httpx
 mcp
+python-dotenv

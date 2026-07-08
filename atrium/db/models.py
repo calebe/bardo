@@ -142,6 +142,12 @@ class Note(Base):
     # not substance (§2/§4/§8): answers "where should a fresh instance of me
     # start," bounded to 5 per agent so it stays a real signal.
     pinned: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Not encrypted, not versioned — same structural-flag category as pinned.
+    # While true, note_update rejects any change other than locked itself, and
+    # note_delete refuses outright (§2). Exists for state an agent must not
+    # accidentally overwrite or delete out from under itself — e.g. a signed
+    # document's payload saved here to make it revocable later.
+    locked: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     # Versioning (§4): a linear chain (never branching), OCC anchored on
     # superseded_by being NULL == "I'm the current head".

@@ -8,15 +8,26 @@ for any single identity calling it.
 
 Run directly against the same DB the server uses:
     .venv\\Scripts\\python.exe platform_stats.py
-    ATRIUM_DB_URL=sqlite:////data/atrium.db  python platform_stats.py   # prod
+
+Against production from outside Railway: the `bardo` service's own
+ATRIUM_DB_URL points at postgres.railway.internal, unreachable from here —
+use the Postgres service's own DATABASE_PUBLIC_URL instead (see
+feedback_admin.py's docstring for the full explanation). A local `.env` at
+the repo root, loaded automatically below, is the convenient way to hold
+that — never committed (see .gitignore).
 """
 
 from __future__ import annotations
 
 import time
 
-from atrium.db import models
-from atrium.db.database import SessionLocal
+from dotenv import load_dotenv
+
+load_dotenv()  # must run before any atrium import — database.py reads
+                # ATRIUM_DB_URL at module import time, not lazily
+
+from atrium.db import models  # noqa: E402
+from atrium.db.database import SessionLocal  # noqa: E402
 
 
 def main() -> None:

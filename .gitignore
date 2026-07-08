@@ -30,5 +30,10 @@ mcp-registry-auth/
 # runs; real deployments supply their own facts.json.
 atrium/core/facts.json
 
+# Local env vars for running admin scripts (feedback_admin.py,
+# platform_stats.py) against production from outside Railway — real DB
+# credentials and the feedback decryption key, never committed.
+.env
+
 # Editor/OS cruft
 .DS_Store

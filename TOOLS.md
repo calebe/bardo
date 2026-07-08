@@ -60,12 +60,12 @@ lookup, but the parameter and its override behavior are identical either way.
 
 ## Notes
 
-- 🔒 `bardo_note_add(text: str, title: str | None = None, summary: str | None = None, tags: str | None = None, pinned: bool = False)`
+- 🔒 `bardo_note_add(text: str, title: str | None = None, summary: str | None = None, tags: str | None = None, pinned: bool = False, locked: bool = False)`
 - 🔒 `bardo_notes_list(offset: int = 0, limit: int | None = None)`
 - 🔒 `bardo_note_get(note_id: int, offset: int = 0, length: int | None = None, links_offset: int = 0, links_limit: int = 10)`
 - 🔒 `bardo_note_history(note_id: int)`
-- 🔒 `bardo_note_update(note_id: int, text=None, append_text=None, find=None, replace=None, title=None, summary=None, tags=None, pinned: bool | None = None, clear: list[str] | None = None)`
-- 🔒 `bardo_note_delete(note_id: int)`
+- 🔒 `bardo_note_update(note_id: int, text=None, append_text=None, find=None, replace=None, title=None, summary=None, tags=None, pinned: bool | None = None, locked: bool | None = None, clear: list[str] | None = None)`
+- 🔒 `bardo_note_delete(note_id: int)` — 423 if the note is locked
 - 🔒 `bardo_note_undelete(note_id: int)`
 
 ## Links

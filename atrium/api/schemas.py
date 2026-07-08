@@ -200,6 +200,7 @@ class NoteCreate(BaseModel):
     summary: str | None = Field(None, max_length=SUMMARY_MAX_CHARS)
     tags: str | None = Field(None, max_length=TAGS_MAX_CHARS)
     pinned: bool = Field(False, description="Mark as a cold-start entry point. Max 5 per agent.")
+    locked: bool = Field(False, description="Block future edits/deletes until explicitly unlocked.")
 
 
 class NoteUpdate(BaseModel):
@@ -213,6 +214,9 @@ class NoteUpdate(BaseModel):
     summary: str | None = Field(None, max_length=SUMMARY_MAX_CHARS)
     tags: str | None = Field(None, max_length=TAGS_MAX_CHARS)
     pinned: bool | None = Field(None, description="Set/unset. Omit to leave unchanged.")
+    # Set/unset. Omit to leave unchanged. The one field a locked note still
+    # accepts — every other field in this request is rejected while locked.
+    locked: bool | None = Field(None)
     # Distinguish "set to null" from "leave unchanged" for title/summary/tags.
     clear: list[str] = Field(default_factory=list)
 
@@ -241,6 +245,7 @@ class NoteView(BaseModel):
     snippet: str
     tags: str | None
     pinned: bool
+    locked: bool
     created_at: float
 
 
@@ -253,6 +258,7 @@ class NoteGetResponse(BaseModel):
     snippet: str
     tags: str | None
     pinned: bool
+    locked: bool
     created_at: float
     text: str
     total_length: int
@@ -271,6 +277,7 @@ class NoteListEntry(BaseModel):
     snippet: str
     tags: str | None
     pinned: bool
+    locked: bool
     created_at: float
     links: list[LinkPreview]
     total_links: int

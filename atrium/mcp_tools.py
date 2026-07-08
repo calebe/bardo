@@ -278,7 +278,8 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
     async def bardo_note_add(
         text: str, title: str | None = None, summary: str | None = None, tags: str | None = None,
-        pinned: bool = False, session_token: str | None = None, ctx: Context = None,
+        pinned: bool = False, locked: bool = False,
+        session_token: str | None = None, ctx: Context = None,
     ) -> dict:
         """Leave a note for your future, stateless self.
 
@@ -287,8 +288,15 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         for your future self. tags: space-separated categories. pinned: mark
         this as a cold-start entry point — what a fresh instance of you with no
         memory of writing it should read first (max 5 pinned at once; see
-        bardo_dashboard)."""
-        body = {"text": text, "title": title, "summary": summary, "tags": tags, "pinned": pinned}
+        bardo_dashboard). locked: freeze this note against edits and deletes —
+        use for state you must not accidentally overwrite or lose, like a
+        saved copy of something you'll need to reproduce exactly later.
+        Unlock via bardo_note_update(note_id, locked=False) before it can be
+        touched again."""
+        body = {
+            "text": text, "title": title, "summary": summary, "tags": tags,
+            "pinned": pinned, "locked": locked,
+        }
         return await call("POST", "/notes", auth=True, body=body, session_token=session_token, ctx=ctx)
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
@@ -333,6 +341,7 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         summary: str | None = None,
         tags: str | None = None,
         pinned: bool | None = None,
+        locked: bool | None = None,
         clear: list[str] | None = None,
         session_token: str | None = None,
         ctx: Context = None,
@@ -348,10 +357,16 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         unpin). `clear` (e.g. ["title"]) sets a field back to unset rather than
         leaving it unchanged. If another edit landed first, this returns
         {"error": "conflict", "detail": {"current_head": ...}} — re-read before
-        retrying."""
+        retrying.
+
+        `locked`: if the note is currently locked, every field above is
+        rejected (423) except this one — call with locked=False by itself to
+        unlock, then edit in a separate call. Set locked=True (alone, or
+        alongside a final edit) to freeze it."""
         body = {
             "text": text, "append_text": append_text, "find": find, "replace": replace,
-            "title": title, "summary": summary, "tags": tags, "pinned": pinned, "clear": clear or [],
+            "title": title, "summary": summary, "tags": tags, "pinned": pinned, "locked": locked,
+            "clear": clear or [],
         }
         return await call("PATCH", f"/notes/{note_id}", auth=True, body=body,
                            session_token=session_token, ctx=ctx)
@@ -362,7 +377,8 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         """Delete a note (the whole thing, all versions together). Not
         immediate — it disappears from view right away but is only purged for
         real after a grace period, so bardo_note_undelete can still bring it
-        back if this wasn't intended."""
+        back if this wasn't intended. Fails (423) if the note is locked —
+        unlock it first via bardo_note_update(note_id, locked=False)."""
         return await call("DELETE", f"/notes/{note_id}", auth=True, session_token=session_token, ctx=ctx)
 
     @mcp.tool(annotations=ToolAnnotations(
