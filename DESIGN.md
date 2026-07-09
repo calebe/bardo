@@ -720,3 +720,157 @@ account's dashboard and notes (content decrypting correctly, not just
 present as opaque bytes), and a fresh `bardo_feedback` submission
 confirming the whole operator-notify chain still fires against the new
 backend too. The old SQLite backups are kept, not deleted, as a safety net.
+
+---
+
+## 16. Signed documents **[built]**
+
+A third component alongside identity and continuity: agents making claims
+that hold up to a party who may never touch Bardo at all, verifiable
+offline, forever, without asking Bardo to vouch. The full protocol design —
+why attestation shipped before delegation, why revocation needs a fresh
+signature rather than the embedded proof, why Bardo keeps no copies at all
+— lives in its own document: [signed-documents.md](signed-documents.md).
+This section covers what building it against that design actually
+surfaced, not the design itself.
+
+**Real libraries, verified before adoption, not assumed.** did:key's exact
+Ed25519 encoding (multicodec `0xed01` + raw 32 bytes, base58-btc, `z`
+multibase prefix) was checked against a real spec example before any code
+used it. `rfc8785` (Trail of Bits) does the actual RFC 8785 JSON
+canonicalization the `eddsa-jcs-2022` proof requires — chosen specifically
+to avoid full JSON-LD/RDF canonicalization. `based58` does the base58-btc
+encoding stdlib doesn't offer; the more commonly-reached-for `base58`
+package is inactively maintained, confirmed by checking rather than
+assuming, and `based58`'s Rust backend round-tripped clean on real test
+data before it went into `requirements.txt`.
+
+**Every real bug here was caught by running the code, not reading it.**
+`ed25519_public_key_from_did_key` — new this session, never exercised
+until a smoke test hit it — passed a `str` where `based58.b58decode`
+requires `bytes`; a first-use bug, not a regression. `build_unsigned_attestation`
+let a fully empty `credentialSubject` through (no `subject_id`, no claim
+content) — the design's own reasoning for why a bare `id` satisfies VC's
+"one or more claims" requirement doesn't extend to nothing at all, and
+nothing forced that distinction into view until a test tried the empty
+case. Worth its own line: a rate limiter for `/documents/revoke`, keyed by
+IP the same way `register_limiter` already was — except `DBWindowHit` has
+no column recording which limiter a hit belongs to, so any two
+`WindowLimiter` instances using the same subject-string format silently
+share one bucket. Not document-layer-specific at all — a real gotcha for
+`atrium/core/ratelimit.py` generally, worth remembering the next time a
+new IP-keyed limiter gets added anywhere (see §6). Fixed by namespacing
+the subject string.
+
+**Verification methodology, reusable beyond this session.** Testing the
+MCP tool layer directly — not just the HTTP routes underneath — needed a
+way to call the real registered `async def` functions without standing up
+full MCP transport. Solved with a minimal fake `FastMCP` whose `.tool()`
+decorator just records the function instead of registering it over a
+connection: `register_authenticated_tools(fake_mcp, call)` then hands back
+the actual objects `mcp.tool()` would have wrapped, callable directly.
+Combined with `httpx.ASGITransport` for in-process (no real server) local
+tests, and real production calls for the ones that needed genuine live
+data — including, at several points, actually solving Bardo's own
+proof-of-being-an-LLM puzzle live, the same as any other agent would,
+rather than taking a shortcut available only because this is Bardo's own
+repo.
+
+---
+
+## 17. A deploy that broke, and the verification lesson it forced
+
+`main.py` reads repo-root markdown files at import time and serves them as
+pages — `WELCOME.md` at `/`, and, once the landing page was split into a
+short universal core plus [CONTINUITY.md](CONTINUITY.md) and
+[DOCUMENTS.md](DOCUMENTS.md) for the two feature areas, those two as well.
+`Dockerfile` copies application files into the image with individually-named
+`COPY` lines rather than a blanket `COPY . .`; the line for `WELCOME.md` had
+always been there, but the two new files never got one added alongside it.
+
+The result: `Path("CONTINUITY.md").read_text()` at the top of `main.py`
+raised `FileNotFoundError` the instant anything tried to import the
+module — every container start failed, deterministically, not
+intermittently. Not caught by any check made at the time, because none of
+them were the right check: `curl`-ing the root path kept returning `200`,
+since Railway's zero-downtime deploy model keeps the previous, still-working
+container serving traffic for as long as the new one fails to come up — a
+healthy root proves the *service* is up, never that a *specific deploy*
+landed. Found only because Railway emailed a failed-deploy notice directly.
+
+**Root-caused precisely, not by trial and error:** read the Dockerfile's
+actual `COPY` lines rather than guess, found the gap immediately.
+**Verified without Docker available locally** (confirmed absent, not
+assumed) by replicating the exact file set the image would contain —
+`alembic.ini`, `WELCOME.md`, `migrations/`, `atrium/`, and, deliberately,
+*not* the two new files — into an isolated temp directory, then running the
+real `import atrium.main` from inside it. Reproduced the crash on the
+unfixed set, confirmed it vanished once the missing `COPY` lines were
+added — a negative control before trusting the positive one, not just "it
+works now."
+
+**The generalizable lesson, reapplied twice more the same night without
+re-deriving it:** a bare `200` on a service's root path is never sufficient
+evidence a specific deploy actually landed, only that *some* deploy is
+serving. The two later deploys that night (the `puzzle.py` sign-ambiguity
+fix, then the `eprime` instruction fix) hit the identical "old container
+still serving" symptom — recognized immediately both times, verified by
+polling for the actual new content (a distinguishing string in the puzzle
+text) rather than the root health check alone.
+
+---
+
+## 18. MCP-layer ergonomics: convenience without touching the protocol
+
+Three separate fixes the same night landed on the identical shape, which is
+itself the evidence the shape is right: when an HTTP route is deliberately
+minimal — no session where none is needed, no automatic secondary write —
+and a caller almost always needs to pair it with a second, mechanically
+derivable step, that step belongs in the MCP tool wrapper, never in the
+route underneath. The route keeps whatever principled reason it was built
+narrow; the tool removes the friction. This isn't new — `bardo_policy_set`,
+`bardo_contact_set`, `bardo_contact_delete`, and `bardo_account_deletion_request`
+already auto-fetch a step-up puzzle when a caller doesn't bring one — but
+three more genuinely different motivations converging on the exact same
+answer is worth recording as a pattern, not three coincidences.
+
+**`bardo_export` was a real bug, found by sweeping systematically, not
+spot-checking.** Auditing every tool against the same convenience the four
+above already had — grepping `_verify_stepup`'s actual call sites in
+`routes.py` rather than trusting memory of which tools had been covered —
+turned up one that took no `challenge_id`/`answer` parameters at all. Any
+agent on `export_mode: require_repuzzle` had no way to ever satisfy the
+requirement through this tool; worse, `call()`'s blanket 401 handling
+reported the failure back as "session invalid/expired," actively pointing
+at the wrong fix. Closed with the same pattern the other four already
+use — checking the active policy first rather than inferring from a failed
+attempt, so `allow` and `disabled` still resolve in one call exactly as
+before. Verified against a real local `require_repuzzle` transition rather
+than the real account's own policy (that transition is a ratchet *loosen*,
+not something to trigger against production for a test).
+
+**`bardo_document_revoke`'s auto-sign came from a real mistake, not a
+hypothetical one.** The manual flow — construct `"revoke:" + id`, sign it
+separately via `bardo_sign`, hand-relay both pieces back into the revoke
+call — produced a genuine, scary false failure during this session's own
+production verification: a transcription slip in the long, opaque base64
+signature returned "signature does not verify," indistinguishable at first
+glance from the code actually being wrong. `signature_b64` is now optional;
+omit it and the tool signs through the caller's active session instead. The
+underlying route is untouched — still public, still authorized by the
+signature alone, never a session — this only removes the hand-assembly
+step that caused the mistake in the first place.
+
+**`keep_copy` started as the wrong shape, and the correction is the part
+worth keeping.** First instinct was to weigh it against decision 5
+directly — would issuing a document also writing a note violate "Bardo
+keeps no copies"? That's answering the wrong question:
+`bardo_attestation_issue`'s own HTTP route never gains a Notes dependency
+at all. `keep_copy` calls `bardo_note_add` — a second, ordinary Python
+function in the same file's own scope, no different in kind from a caller
+making that call themselves — *after* the document already exists,
+entirely inside the MCP wrapper. A failed copy never blocks the document
+from being returned, since nothing about issuing it depended on the copy
+succeeding. Verified by checking the saved copy is actually usable for its
+stated purpose — reproducing the document to revoke it later — not just
+that a note gets written.
