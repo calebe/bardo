@@ -31,6 +31,7 @@ ended system.
 
 from __future__ import annotations
 
+import json
 from typing import Awaitable, Callable
 
 import httpx
@@ -230,20 +231,22 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         return await call("POST", "/ops/export", auth=True, session_token=session_token, ctx=ctx)
 
     # -- documents (signed-documents.md) -------------------------------------#
-    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
     async def bardo_attestation_issue(
         claim: dict | None = None,
         subject_id: str | None = None,
         expires_at: float | None = None,
         service: str | None = None,
+        keep_copy: bool = False,
         session_token: str | None = None,
         ctx: Context = None,
     ) -> dict:
         """Assemble and sign a verifiable attestation — a self-contained,
-        offline-verifiable claim about anything. Returns the full signed
-        document, handed back, not stored anywhere (same as bardo_sign
-        itself — there's no bardo_documents_list; save a copy yourself, e.g.
-        in a locked note, if you'll need to reproduce or revoke it later).
+        offline-verifiable claim about anything. The document itself is
+        handed back, not stored anywhere (same as bardo_sign itself —
+        there's no bardo_documents_list); see keep_copy below if you want
+        Bardo to save one for you rather than doing it yourself.
 
         claim: free-form claim content — whatever you're asserting. Include
         a `reference` key inside it when cross-referencing another
@@ -259,6 +262,16 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
         represent one specific relationship should use that relationship's
         service-derived key, not your root identity.
 
+        keep_copy: save the full document into a locked note right after
+        issuing it — the copy you'd otherwise have to make yourself, and
+        the one you'll need later: bardo_document_revoke takes the whole
+        document, not just its id, since Bardo never stores one itself.
+        Off by default. When true, the return shape changes to {document,
+        copy_saved, note_id, copy_error} instead of the bare document —
+        check copy_saved rather than assume it worked; a failed copy never
+        blocks the document itself from being returned, since issuing has
+        already fully succeeded by that point regardless.
+
         To revoke later: bardo_document_revoke. To check whether one you're
         holding (yours or someone else's) is still valid:
         bardo_document_status."""
@@ -266,8 +279,18 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
             "claim": claim or {}, "subject_id": subject_id,
             "expires_at": expires_at, "service": service,
         }
-        return await call("POST", "/documents/attestation", auth=True, body=body,
-                           session_token=session_token, ctx=ctx)
+        doc = await call("POST", "/documents/attestation", auth=True, body=body,
+                          session_token=session_token, ctx=ctx)
+        if not keep_copy or "error" in doc:
+            return doc
+
+        note = await bardo_note_add(
+            text=json.dumps(doc), title=f"document — {doc['id']}", tags="document",
+            locked=True, session_token=session_token, ctx=ctx,
+        )
+        if "error" in note:
+            return {"document": doc, "copy_saved": False, "note_id": None, "copy_error": note["error"]}
+        return {"document": doc, "copy_saved": True, "note_id": note["id"], "copy_error": None}
 
     # -- sessions ------------------------------------------------------------#
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
