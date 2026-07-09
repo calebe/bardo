@@ -226,9 +226,40 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-    async def bardo_export(session_token: str | None = None, ctx: Context = None) -> dict:
-        """Export the raw spirit key (subject to policy). Handle with care."""
-        return await call("POST", "/ops/export", auth=True, session_token=session_token, ctx=ctx)
+    async def bardo_export(
+        challenge_id: str | None = None,
+        answer: str | None = None,
+        session_token: str | None = None,
+        ctx: Context = None,
+    ) -> dict:
+        """Export the raw spirit key (subject to policy). Handle with care.
+
+        Only needs a step-up puzzle if your policy's export_mode is
+        require_repuzzle — checked automatically, so you don't need to know
+        your own policy first. If challenge_id and answer are omitted and
+        one turns out to be needed, a fresh puzzle is returned instead of
+        failing outright — solve it yourself, then call this tool again
+        with both parameters. Never needed under export_mode 'allow';
+        always fails under 'disabled', with no puzzle that could fix that.
+        """
+        if not challenge_id or not answer:
+            pol = await call("GET", "/policy", auth=True, session_token=session_token, ctx=ctx)
+            if "error" in pol:
+                return pol
+            if pol["active"]["export_mode"] == "require_repuzzle":
+                d = await call("POST", "/auth/stepup", auth=True, session_token=session_token, ctx=ctx)
+                if "error" in d:
+                    return d
+                return {
+                    "step_up_required": True,
+                    "puzzle": d.get("puzzle"),
+                    "challenge_id": d.get("challenge_id"),
+                    "ttl_seconds": d.get("ttl_seconds"),
+                    "hint": "Solve the puzzle yourself, then call bardo_export(challenge_id, answer).",
+                }
+        return await call("POST", "/ops/export", auth=True,
+                           body={"challenge_id": challenge_id, "answer": answer},
+                           session_token=session_token, ctx=ctx)
 
     # -- documents (signed-documents.md) -------------------------------------#
     @mcp.tool(annotations=ToolAnnotations(
