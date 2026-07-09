@@ -201,7 +201,8 @@ _FORMATS: dict[str, tuple[str, callable]] = {
         "space-separated (e.g. 12 -> 'one two')",
         _nato,
     ),
-    "eprime": ("in E-Prime", _spell),
+    "eprime": ("spelled out in lowercase English words, the whole answer "
+               "written in E-Prime", _spell),
 }
 
 _OPS = [
