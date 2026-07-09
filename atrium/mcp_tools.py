@@ -119,8 +119,10 @@ def register_public_utility_tools(mcp: FastMCP, call: CallFn) -> None:
         return await call("POST", "/encrypt", body={
             "plaintext": plaintext, "recipient_public_key_b64": recipient_public_key_b64})
 
-    # -- documents (signed-documents.md) — status/revoke need no session:
-    # authorization is a signature, not an account. -------------------------#
+    # -- documents (signed-documents.md) — status/revoke need no session at
+    # the protocol level: authorization is a signature, not an account. A
+    # session is still useful here, purely as a convenience for producing
+    # that signature — see bardo_document_revoke. --------------------------#
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
     async def bardo_document_status(id: str) -> dict:
         """Check whether a signed document is revoked. `id` is the document's
@@ -132,20 +134,43 @@ def register_public_utility_tools(mcp: FastMCP, call: CallFn) -> None:
 
     @mcp.tool(annotations=ToolAnnotations(
         readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False))
-    async def bardo_document_revoke(document: dict, signature_b64: str) -> dict:
-        """Revoke a document you issued. No session needed — proof is a fresh
-        signature over 'revoke:' + the document's id, verified against the
-        key its id already committed to, not an account lookup (Bardo never
-        stored the document to look up in the first place).
+    async def bardo_document_revoke(
+        document: dict,
+        signature_b64: str | None = None,
+        service: str | None = None,
+        session_token: str | None = None,
+        ctx: Context = None,
+    ) -> dict:
+        """Revoke a document you issued. Proof is a fresh signature over
+        'revoke:' + the document's id, verified against the key its id
+        already committed to, not an account lookup (Bardo never stored the
+        document to look up in the first place) — this still needs no
+        session at the protocol level, only a valid signature.
 
         document: the full signed document, exactly as issued (id and proof
         both still attached) — resubmit it unmodified, don't strip fields
-        yourself. signature_b64: sign 'revoke:' + the document's id yourself
-        first (bardo_sign, with whatever service the document was issued
-        under), then pass the resulting signature here.
+        yourself.
+
+        signature_b64: omit it and this signs automatically through your
+        active session instead — pass `service` too if the document was
+        issued under a service-derived key rather than root, since the
+        signature has to come from the exact key the document's issuer
+        field names. Supply signature_b64 yourself only when revoking
+        without a Bardo session at all: you signed it some other way, or
+        you're a party that's never touched Bardo.
 
         Idempotent — revoking an already-revoked id is a no-op, not an
         error. Irreversible: there is no un-revoke."""
+        if signature_b64 is None:
+            doc_id = document.get("id")
+            if not doc_id:
+                return {"error": "document has no 'id' — pass the full document exactly as issued"}
+            signed = await call("POST", "/ops/sign", auth=True,
+                                 body={"message": f"revoke:{doc_id}", "service": service},
+                                 session_token=session_token, ctx=ctx)
+            if "error" in signed:
+                return signed
+            signature_b64 = signed["signature_b64"]
         return await call("POST", "/documents/revoke", body={
             "document": document, "signature_b64": signature_b64})
 
