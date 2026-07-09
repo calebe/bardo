@@ -137,7 +137,6 @@ _NEGATE_TEMPLATES: list[str] = [
 _NATO = {
     "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
     "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine",
-    "-": "dash",
 }
 
 _ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven",
@@ -148,9 +147,9 @@ _TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
 
 
 def _spell(n: int) -> str:
-    """Spell an integer in English (handles the small range puzzles produce)."""
-    if n < 0:
-        return "negative " + _spell(-n)
+    """Spell an integer in English (handles the small range puzzles produce).
+    Only ever called with n >= 0 — generate() passes abs(value); the answer
+    checks digits only, never sign (see the Status/expected note there)."""
     if n < 20:
         return _ONES[n]
     if n < 100:
@@ -164,16 +163,15 @@ def _spell(n: int) -> str:
 
 
 def _to_base(n: int, base: int) -> str:
+    """Only ever called with n >= 0 — see _spell's docstring for why."""
     if n == 0:
         return "0"
-    sign = "-" if n < 0 else ""
-    n = abs(n)
     digits = "0123456789abcdef"
     out = ""
     while n:
         n, r = divmod(n, base)
         out = digits[r] + out
-    return sign + out
+    return out
 
 
 # Answer-format registry: name -> (human instruction, encoder(int) -> str)
@@ -182,8 +180,7 @@ def _to_base(n: int, base: int) -> str:
 # meta-knowledge — an LLM knows immediately that E-Prime (English without
 # any form of "to be") doesn't affect number words; a human may not.
 def _reversed(n: int) -> str:
-    if n < 0:
-        return "negative " + str(-n)[::-1]
+    """Only ever called with n >= 0 — see _spell's docstring for why."""
     return str(n)[::-1]
 
 
@@ -198,8 +195,7 @@ _FORMATS: dict[str, tuple[str, callable]] = {
     "base8":   ("in base 8 (octal)",                   lambda n: _to_base(n, 8)),
     "base16":  ("in base 16 (hexadecimal, lowercase)", lambda n: _to_base(n, 16)),
     "spelled": ("spelled out in lowercase English words", _spell),
-    "reversed": ("as decimal digits in reverse order (negative numbers: "
-                 "write 'negative' then reverse the digits)", _reversed),
+    "reversed": ("as decimal digits in reverse order", _reversed),
     "nato": (
         "with each decimal digit replaced by its lowercase NATO-style word, "
         "space-separated (e.g. 12 -> 'one two')",
@@ -402,9 +398,18 @@ def generate(
 
     fmt_name = rng.choice(list(_FORMATS))
     fmt_instruction, encoder = _FORMATS[fmt_name]
-    expected = encoder(value)
+    # Digits-only proof: getting the magnitude right through a real 4-6 step
+    # chain is the actual asymmetry being tested (layer 2). Sign added a second,
+    # format-dependent convention with no single answer (spelled/reversed wrote
+    # the word "negative", base-N used a literal "-", nato had its own "dash")
+    # that a solver had no way to know in advance — ambiguity, not rigor.
+    expected = encoder(abs(value))
 
-    instruction = f"Compute the result and give the answer {fmt_instruction}."
+    instruction = (
+        f"Compute the result and give the answer {fmt_instruction}. "
+        "If the result is negative, give its absolute value instead — "
+        "only the digits are checked, not the sign."
+    )
     full_plain = f"{question}. {instruction}"
 
     prompt = _noise(full_plain, rng) if noise else full_plain
