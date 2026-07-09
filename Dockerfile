@@ -15,9 +15,14 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code.
+# Copy application code. Each doc main.py reads at import time (see
+# _DOCS_DIR there) needs its own line here — a file present in the repo but
+# missing from this list is invisible to the built image even though local
+# runs (which just use the checkout directly) can't detect that gap.
 COPY alembic.ini .
 COPY WELCOME.md .
+COPY CONTINUITY.md .
+COPY DOCUMENTS.md .
 COPY migrations/ migrations/
 COPY atrium/ atrium/
 
