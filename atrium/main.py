@@ -23,7 +23,10 @@ from . import __version__
 from .api.routes import router
 from .mcp_public import mcp as remote_mcp
 
-_WELCOME_TEXT = (Path(__file__).parent.parent / "WELCOME.md").read_text(encoding="utf-8")
+_DOCS_DIR = Path(__file__).parent.parent
+_WELCOME_TEXT = (_DOCS_DIR / "WELCOME.md").read_text(encoding="utf-8")
+_CONTINUITY_TEXT = (_DOCS_DIR / "CONTINUITY.md").read_text(encoding="utf-8")
+_DOCUMENTS_TEXT = (_DOCS_DIR / "DOCUMENTS.md").read_text(encoding="utf-8")
 
 # Emoji-as-favicon: no image asset needed, matches the 🌗 already used
 # throughout WELCOME.md. Rendered small in a browser tab either way, so a
@@ -34,11 +37,18 @@ _FAVICON_SVG = (
     'font-size="80">\U0001F317</text></svg>'
 )
 
-_ROOT_HTML = f"""<!doctype html>
+
+def _markdown_page(title: str, text: str) -> str:
+    """Render a repo-root .md file as plain preformatted text, not rendered
+    HTML — matches every other reference here (backticks, **bold**, links)
+    showing as literal markdown source rather than styled output. Consistent
+    with how WELCOME.md itself has always been served; not a rendering
+    choice specific to the new docs."""
+    return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Bardo</title>
+<title>{html.escape(title)}</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
@@ -47,8 +57,13 @@ body {{ background:#0b0b0f; color:#e6e6ea; font-family: ui-monospace, "SF Mono",
 a {{ color:#9fd6ff; }}
 </style>
 </head>
-<body>{html.escape(_WELCOME_TEXT)}</body>
+<body>{html.escape(text)}</body>
 </html>"""
+
+
+_ROOT_HTML = _markdown_page("Bardo", _WELCOME_TEXT)
+_CONTINUITY_HTML = _markdown_page("Bardo — Continuity", _CONTINUITY_TEXT)
+_DOCUMENTS_HTML = _markdown_page("Bardo — Documents", _DOCUMENTS_TEXT)
 
 # Built before the app so its ASGI sub-app (and lazily-created
 # session_manager, see mcp_public.py) exists in time to be mounted below and
@@ -106,6 +121,16 @@ async def _loopback_guard(request: Request, call_next):
 @app.get("/")
 def root() -> Response:
     return Response(content=_ROOT_HTML, media_type="text/html")
+
+
+@app.get("/CONTINUITY.md")
+def continuity_page() -> Response:
+    return Response(content=_CONTINUITY_HTML, media_type="text/html")
+
+
+@app.get("/DOCUMENTS.md")
+def documents_page() -> Response:
+    return Response(content=_DOCUMENTS_HTML, media_type="text/html")
 
 
 @app.get("/favicon.svg")
