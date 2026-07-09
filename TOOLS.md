@@ -3,10 +3,10 @@
 The complete `bardo_*` tool list, shared between two servers (same tool
 bodies, see `atrium/mcp_tools.py`):
 
-- **`mcp_server.py`** — local stdio, for a shell-capable agent. 39 tools
+- **`mcp_server.py`** — local stdio, for a shell-capable agent. 41 tools
   (includes `bardo_whoami`, a pure local-file read).
 - **`https://bardo.id/mcp/`** — public streamable-http, for any MCP client,
-  no install. 38 tools (no `bardo_whoami` — a local credential file has no
+  no install. 40 tools (no `bardo_whoami` — a local credential file has no
   meaning for a multi-tenant remote server). See
   [DESIGN.md §13](DESIGN.md#13-the-public-mcp-server-built) for why it's one
   connection with no auth gate rather than the header-based split an earlier
@@ -43,7 +43,10 @@ lookup, but the parameter and its override behavior are identical either way.
 - 🔒 `bardo_public_key(service: str | None = None)`
 - 🔒 `bardo_derive(service: str)`
 - 🔒 `bardo_services_list()`
-- 🔒 `bardo_export()`
+- 🔒 `bardo_export(challenge_id: str | None = None, answer: str | None = None)`
+  — step-up puzzle only if your policy's `export_mode` is `require_repuzzle`,
+  checked automatically; omit both and a puzzle is returned if one turns out
+  to be needed
 
 ## Sessions
 
@@ -82,6 +85,25 @@ lookup, but the parameter and its override behavior are identical either way.
 - 🔒 `bardo_notices(unread_only: bool = False)`
 - 🔒 `bardo_notices_ack(ids: list[int] | None = None)`
 
+## Documents
+
+Signed, self-contained VC-shaped attestations — see
+[signed-documents.md](signed-documents.md) and
+[DOCUMENTS.md](DOCUMENTS.md). Issuing needs a session; checking and
+revoking are public by design (authorization is a signature, not an
+account) — neither is marked 🔒 below even though revoke optionally
+accepts a session_token as a signing convenience, covered in its own
+entry rather than the shared blanket note at the top of this file.
+
+- 🔒 `bardo_attestation_issue(claim: dict | None = None, subject_id: str | None = None, expires_at: float | None = None, service: str | None = None, keep_copy: bool = False)`
+  — `keep_copy=True` also saves the document into a locked note in the same
+  call; check the response's `copy_saved` rather than assume it worked
+- `bardo_document_status(id: str)`
+- `bardo_document_revoke(document: dict, signature_b64: str | None = None, service: str | None = None)`
+  — omit `signature_b64` to sign automatically through an active session
+  (pass `service` too if the document wasn't issued under root); supply it
+  yourself only when revoking with no Bardo session at all
+
 ## Feedback
 
 One-way and stateless — no thread, no context carried between calls. A reply,
@@ -111,4 +133,4 @@ full mechanism and the reasoning behind it.
 - 🔒 `bardo_account_deletion_request(challenge_id: str | None = None, answer: str | None = None)`
 - 🔒 `bardo_account_deletion_cancel()`
 
-39 tools on local stdio; 38 on the public server (no `bardo_whoami`).
+41 tools on local stdio; 40 on the public server (no `bardo_whoami`).

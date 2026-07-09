@@ -23,8 +23,9 @@ credentials of its own — not given or curated by anyone else.
 For the reasoning behind these choices — and the designed-but-not-yet-built
 parts (bootstrapping, hardware factors, the messenger) — see [DESIGN.md](DESIGN.md).
 The notes subsystem (versioning, links, deletion, volume limits) has its own
-design doc: [notes-project.md](notes-project.md). The full MCP tool list with
-signatures lives in [TOOLS.md](TOOLS.md).
+design doc: [notes-project.md](notes-project.md). The signed-document layer
+has its own too: [signed-documents.md](signed-documents.md). The full MCP
+tool list with signatures lives in [TOOLS.md](TOOLS.md).
 
 ## The idea
 
@@ -79,7 +80,8 @@ NOTES (self-authored; versioned, range-addressable — see notes-project.md)
   GET    /notes/{id}/history   every surviving version (newest→oldest, ≤10)
   PATCH  /notes/{id}        edit: text | append_text | find+replace (exactly
                              one — each supersedes, never overwrites) and/or
-                             title/summary/tags/pinned (in place, not versioned)
+                             title/summary/tags/pinned/locked (in place, not
+                             versioned)
   DELETE /notes/{id}        delay-then-purge — disappears immediately, purged
                              for real after a grace period unless undeleted
   POST   /notes/{id}/undelete   restore within the grace period
@@ -98,6 +100,13 @@ DASHBOARD (one consolidating "get oriented" read)
 NOTICES (first-party; atrium's messages about the account)
   GET    /notices           list notices (?unread_only=true)
   POST   /notices/ack       mark read (all, or {ids:[...]})
+
+DOCUMENTS (signed VC-shaped attestations — see signed-documents.md)
+  POST   /documents/attestation   issue a signed, self-contained attestation
+  GET    /documents/status        check revocation status (no session —
+                                   public, meant for any verifier)
+  POST   /documents/revoke        revoke your own (no session — proof is a
+                                   fresh signature, not an account)
 
 CONTACT (agent-owned notification endpoint)
   GET    /contact           view registered contact endpoint
@@ -261,7 +270,7 @@ Two ways in, depending on what the agent can actually run.
 
 ### Local stdio — an agent with a shell
 
-`mcp_server.py` exposes the keychain as 39 MCP tools (`bardo_login`,
+`mcp_server.py` exposes the keychain as 41 MCP tools (`bardo_login`,
 `bardo_solve`, `bardo_sign`, `bardo_note_add`, `bardo_note_get`,
 `bardo_link_add`, `bardo_dashboard`, `bardo_policy_set`, … — full list with
 signatures in [TOOLS.md](TOOLS.md)). It's a thin client over the running Bardo
@@ -291,7 +300,7 @@ server — the live spirit lives there now. For Claude Code, add to `.mcp.json`:
 
 For a genuinely chat-only agent (no shell, no way to run a local process at
 all), Bardo is also reachable directly at **`https://bardo.id/mcp/`** — no
-install, no local server, just a URL. One connection, all 38 tools always
+install, no local server, just a URL. One connection, all 40 tools always
 visible (everything but `bardo_whoami`, which only makes sense for a local
 file). `mcp-remote` bridges a client that doesn't natively speak
 streamable-http yet:
@@ -396,11 +405,12 @@ stdout by default; Railway's log viewer captures that with no extra setup.
 Working prototype. Core protocol, crypto, puzzle engine, full API surface,
 self-binding policy/ratchet, abuse rate-limiting, a fully redesigned notes
 subsystem (versioning, OCC, delay-then-purge deletion, links, pinned
-cold-start entry points, dashboard — see notes-project.md), account deletion
-(multi-day confirmation gate, see DESIGN.md §8), agent-to-operator feedback
-(sealed-box operator replies, see DESIGN.md §14), an emergency registration
-stop, and a full threat-model pass are implemented and tested (206
-end-to-end checks). Production runs on Postgres (migrated 2026-07-07 from
+cold-start entry points, dashboard — see notes-project.md), a signed-document
+layer (VC-compliant attestations, offline verification, revocation — see
+signed-documents.md), account deletion (multi-day confirmation gate, see
+DESIGN.md §8), agent-to-operator feedback (sealed-box operator replies, see
+DESIGN.md §14), an emergency registration stop, and a full threat-model pass
+are implemented and tested (258 end-to-end checks). Production runs on Postgres (migrated 2026-07-07 from
 SQLite, see DESIGN.md §15) — the app itself still supports either backend
 generically through `ATRIUM_DB_URL`, so SQLite remains the simplest choice
 for local dev or a small self-hosted instance.
