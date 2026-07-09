@@ -119,6 +119,36 @@ def register_public_utility_tools(mcp: FastMCP, call: CallFn) -> None:
         return await call("POST", "/encrypt", body={
             "plaintext": plaintext, "recipient_public_key_b64": recipient_public_key_b64})
 
+    # -- documents (signed-documents.md) — status/revoke need no session:
+    # authorization is a signature, not an account. -------------------------#
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+    async def bardo_document_status(id: str) -> dict:
+        """Check whether a signed document is revoked. `id` is the document's
+        own top-level `id` field (a ni:// URI) — the same thing
+        credentialStatus.id (BardoRevocationCheck) points at. Safe to cache
+        a "not revoked" answer for a while (see the response's own
+        Cache-Control) rather than re-checking on every use."""
+        return await call("GET", "/documents/status", params={"id": id})
+
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False))
+    async def bardo_document_revoke(document: dict, signature_b64: str) -> dict:
+        """Revoke a document you issued. No session needed — proof is a fresh
+        signature over 'revoke:' + the document's id, verified against the
+        key its id already committed to, not an account lookup (Bardo never
+        stored the document to look up in the first place).
+
+        document: the full signed document, exactly as issued (id and proof
+        both still attached) — resubmit it unmodified, don't strip fields
+        yourself. signature_b64: sign 'revoke:' + the document's id yourself
+        first (bardo_sign, with whatever service the document was issued
+        under), then pass the resulting signature here.
+
+        Idempotent — revoking an already-revoked id is a no-op, not an
+        error. Irreversible: there is no un-revoke."""
+        return await call("POST", "/documents/revoke", body={
+            "document": document, "signature_b64": signature_b64})
+
 
 # --------------------------------------------------------------------------- #
 # session-gated tools — require auth=True on every call
@@ -173,6 +203,46 @@ def register_authenticated_tools(mcp: FastMCP, call: CallFn) -> None:
     async def bardo_export(session_token: str | None = None, ctx: Context = None) -> dict:
         """Export the raw spirit key (subject to policy). Handle with care."""
         return await call("POST", "/ops/export", auth=True, session_token=session_token, ctx=ctx)
+
+    # -- documents (signed-documents.md) -------------------------------------#
+    @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+    async def bardo_attestation_issue(
+        claim: dict | None = None,
+        subject_id: str | None = None,
+        expires_at: float | None = None,
+        service: str | None = None,
+        session_token: str | None = None,
+        ctx: Context = None,
+    ) -> dict:
+        """Assemble and sign a verifiable attestation — a self-contained,
+        offline-verifiable claim about anything. Returns the full signed
+        document, handed back, not stored anywhere (same as bardo_sign
+        itself — there's no bardo_documents_list; save a copy yourself, e.g.
+        in a locked note, if you'll need to reproduce or revoke it later).
+
+        claim: free-form claim content — whatever you're asserting. Include
+        a `reference` key inside it when cross-referencing another
+        document's id (or any other content, hashed the same ni:// way) —
+        that's how independent attestations end up pointing at "the same
+        thing," e.g. several agents witnessing one event under a shared
+        reference. subject_id: the did:key the claim is about, if it
+        concerns one specific identified party — leave it unset when it
+        doesn't; a bare self-referential claim ("this document is about its
+        signer") is still valid without it. expires_at: unix timestamp for
+        time-boxed claims only; omit for a claim that never expires.
+        service: same key-selector bardo_sign takes — a document meant to
+        represent one specific relationship should use that relationship's
+        service-derived key, not your root identity.
+
+        To revoke later: bardo_document_revoke. To check whether one you're
+        holding (yours or someone else's) is still valid:
+        bardo_document_status."""
+        body = {
+            "claim": claim or {}, "subject_id": subject_id,
+            "expires_at": expires_at, "service": service,
+        }
+        return await call("POST", "/documents/attestation", auth=True, body=body,
+                           session_token=session_token, ctx=ctx)
 
     # -- sessions ------------------------------------------------------------#
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))

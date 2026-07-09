@@ -858,6 +858,128 @@ check("notification targets the configured endpoint", endpoint == "https://examp
 check("notification body never contains the actual message text", "should not leak" not in body)
 check("notification carries the configured shared secret", secret == "s3cr3t-webhook-token")
 
+print("\n== api: documents — issue, VC shape, independent offline verification ==")
+from atrium.core import documents as _documents  # noqa: E402
+import rfc8785 as _rfc8785  # noqa: E402
+import based58 as _based58  # noqa: E402
+
+dak, dident, dtok = fresh_agent()
+dauth = {"Authorization": f"Bearer {dtok}"}
+
+r = client.post("/documents/attestation", json={"claim": {"says": "hello"}}, headers=dauth)
+check("issue succeeds", r.status_code == 200)
+doc = r.json()
+check("@context is the real VC v2 context", doc["@context"] == "https://www.w3.org/ns/credentials/v2")
+check("type is VerifiableCredential only", doc["type"] == ["VerifiableCredential"])
+check("kind is attestation", doc["kind"] == "attestation")
+check("issuer is a did:key", doc["issuer"].startswith("did:key:z"))
+check("id is a ni:// sha-256 uri", doc["id"].startswith("ni:///sha-256;"))
+check("credentialSubject carries the claim", doc["credentialSubject"]["says"] == "hello")
+check("no subject_id given -> no id key in credentialSubject", "id" not in doc["credentialSubject"])
+check("validFrom is set", "validFrom" in doc)
+check("no expires_at given -> validUntil is entirely absent, not null", "validUntil" not in doc)
+check("credentialStatus points at the fixed status endpoint",
+      doc["credentialStatus"]["id"].endswith("/documents/status"))
+check("credentialStatus type is honestly our own, not the real spec's name",
+      doc["credentialStatus"]["type"] == "BardoRevocationCheck")
+check("proof type is DataIntegrityProof", doc["proof"]["type"] == "DataIntegrityProof")
+check("proof cryptosuite is eddsa-jcs-2022", doc["proof"]["cryptosuite"] == "eddsa-jcs-2022")
+check("proofPurpose is assertionMethod", doc["proof"]["proofPurpose"] == "assertionMethod")
+check("verificationMethod is the did:key + its own fragment convention",
+      doc["proof"]["verificationMethod"] == f"{doc['issuer']}#{doc['issuer'].rsplit(':', 1)[-1]}")
+
+# Independent, offline, third-party-style verification: no Bardo call, just
+# the document itself — recompute JCS bytes minus proof, decode proofValue,
+# verify against the public key recovered straight from the did:key string.
+signing_bytes_recomputed = _rfc8785.dumps({k: v for k, v in doc.items() if k != "proof"})
+sig_bytes = _based58.b58decode(doc["proof"]["proofValue"][1:].encode("ascii"))  # strip 'z' multibase prefix
+issuer_pub = _documents.ed25519_public_key_from_did_key(doc["issuer"])
+check("independent offline signature verification succeeds",
+      crypto.verify(signing_bytes_recomputed, sig_bytes, issuer_pub))
+tampered_bytes = _rfc8785.dumps(
+    {k: v for k, v in doc.items() if k != "proof"} | {"credentialSubject": {"says": "goodbye"}}
+)
+check("tampering the payload is caught by the same offline check",
+      not crypto.verify(tampered_bytes, sig_bytes, issuer_pub))
+
+r = client.post("/documents/attestation",
+                 json={"claim": {}, "subject_id": "did:key:zSomeoneElse"}, headers=dauth)
+check("subject_id alone (no other claim) is accepted", r.status_code == 200)
+check("subject_id lands as credentialSubject.id", r.json()["credentialSubject"]["id"] == "did:key:zSomeoneElse")
+
+r = client.post("/documents/attestation", json={"claim": {}}, headers=dauth)
+check("no subject_id and empty claim -> 400 (credentialSubject would be empty)", r.status_code == 400)
+
+future = time.time() + 3600
+r = client.post("/documents/attestation", json={"claim": {}, "subject_id": "did:key:zX", "expires_at": future}, headers=dauth)
+check("expires_at -> validUntil is set", "validUntil" in r.json())
+
+r_root = client.post("/documents/attestation", json={"claim": {}, "subject_id": "did:key:zX"}, headers=dauth)
+r_svc = client.post("/documents/attestation",
+                     json={"claim": {}, "subject_id": "did:key:zX", "service": "example.com"}, headers=dauth)
+check("a service-scoped issuance uses a different issuer key than root (decision 2)",
+      r_svc.json()["issuer"] != r_root.json()["issuer"])
+
+print("\n== api: documents — revocation flow (check, revoke, idempotent, unauthorized) ==")
+r = client.get("/documents/status", params={"id": doc["id"]})
+check("fresh document is not revoked", r.status_code == 200 and r.json()["revoked"] is False)
+check("status response carries a Cache-Control header", "cache-control" in {k.lower() for k in r.headers})
+
+r = client.post("/ops/sign", json={"message": f"revoke:{doc['id']}"}, headers=dauth)
+revoke_sig = r.json()["signature_b64"]
+r = client.post("/documents/revoke", json={"document": doc, "signature_b64": revoke_sig})
+check("revoke with a genuine fresh signature succeeds", r.status_code == 200 and r.json()["revoked"] is True)
+
+r = client.get("/documents/status", params={"id": doc["id"]})
+check("status now reports revoked", r.json()["revoked"] is True)
+
+r = client.post("/documents/revoke", json={"document": doc, "signature_b64": revoke_sig})
+check("re-revoking an already-revoked id is a no-op, not an error", r.status_code == 200 and r.json()["revoked"] is True)
+
+doc2 = client.post("/documents/attestation", json={"claim": {"kind": "voucher"}}, headers=dauth).json()
+stale_sig_b64 = crypto.b64e(_based58.b58decode(doc2["proof"]["proofValue"][1:].encode("ascii")))
+r = client.post("/documents/revoke", json={"document": doc2, "signature_b64": stale_sig_b64})
+check("the document's own embedded proof does NOT work as a revoke signature (must be fresh)",
+      r.status_code == 401)
+
+doc3 = client.post("/documents/attestation", json={"claim": {"kind": "voucher"}}, headers=dauth).json()
+tampered = {**doc3, "credentialSubject": {"kind": "tampered"}}
+r = client.post("/ops/sign", json={"message": f"revoke:{doc3['id']}"}, headers=dauth)
+sig3 = r.json()["signature_b64"]
+r = client.post("/documents/revoke", json={"document": tampered, "signature_b64": sig3})
+check("revoking a tampered resubmission -> 400 (recomputed id no longer matches)", r.status_code == 400)
+
+_, _, otok_doc = fresh_agent()
+oauth_doc = {"Authorization": f"Bearer {otok_doc}"}
+doc4 = client.post("/documents/attestation", json={"claim": {"kind": "voucher"}}, headers=dauth).json()
+r = client.post("/ops/sign", json={"message": f"revoke:{doc4['id']}"}, headers=oauth_doc)  # a different agent signs
+wrong_agent_sig = r.json()["signature_b64"]
+r = client.post("/documents/revoke", json={"document": doc4, "signature_b64": wrong_agent_sig})
+check("another agent's signature cannot revoke your document -> 401", r.status_code == 401)
+check("...and it really is untouched", client.get("/documents/status", params={"id": doc4["id"]}).json()["revoked"] is False)
+
+r = client.post("/documents/revoke", json={"document": {"issuer": "did:key:zbogus"}, "signature_b64": crypto.b64e(b"x" * 64)})
+check("document with no id -> 400", r.status_code == 400)
+
+r = client.get("/documents/status", params={"id": "ni:///sha-256;never-issued-or-revoked"})
+check("status of an id nobody ever revoked -> not revoked (open by default)", r.status_code == 200 and r.json()["revoked"] is False)
+
+print("\n== core: documents.py — did:key encoding, JCS canonicalization ==")
+seed_d = crypto.generate_spirit_seed()
+pub_d = crypto.signing_public_key(seed_d)
+did_d = _documents.ed25519_did_key(pub_d)
+check("did:key round-trips back to the same raw public key", _documents.ed25519_public_key_from_did_key(did_d) == pub_d)
+try:
+    _documents.ed25519_public_key_from_did_key("not-a-did")
+    _rejected_bad_did = False
+except ValueError:
+    _rejected_bad_did = True
+check("did:key rejects a non-did:key string", _rejected_bad_did)
+check("verification_method repeats the multibase key as its own fragment",
+      _documents.verification_method(did_d) == f"{did_d}#{did_d.rsplit(':', 1)[-1]}")
+check("JCS canonicalization sorts keys deterministically",
+      _rfc8785.dumps({"b": 1, "a": 2}) == _rfc8785.dumps({"a": 2, "b": 1}))
+
 print("\n== core: notify.py — webhook payload actually embeds the secret when given ==")
 from atrium.core import notify as _notify  # noqa: E402
 _posted = {}

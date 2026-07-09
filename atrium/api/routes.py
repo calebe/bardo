@@ -14,6 +14,9 @@ Endpoint groups:
   /dashboard                one consolidating "get oriented" read
   /notices                  first-party notices about the account (read/ack)
   /feedback                 agent-to-operator feedback (write-only, one-way)
+  /documents                signed VC-shaped attestations (signed-documents.md) —
+                             issue is session-gated; status/revoke are public,
+                             authorized by signature alone, not a session
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ from fastapi.responses import Response
 from sqlalchemy import or_
 from sqlalchemy.orm import Session as DbSession
 
-from ..core import account_delete, crypto, notify, policy, puzzle
+from ..core import account_delete, crypto, documents, notify, policy, puzzle
 from ..core import feedback as feedback_logic
 from ..core import notes as notes_logic
 from ..core.ratelimit import BackoffLimiter, WindowLimiter
@@ -52,6 +55,11 @@ register_limiter = WindowLimiter(SessionLocal, limit=20, window_seconds=3600)
 notes_write_limiter = WindowLimiter(SessionLocal, limit=60, window_seconds=3600)
 # feedback.py: lower than notes — this reaches a human's inbox, not just storage.
 feedback_limiter = WindowLimiter(SessionLocal, limit=10, window_seconds=3600)
+# /documents/revoke has no session to key a limiter on (decision 5's
+# consequences — authorized by signature alone), so it's IP-keyed like
+# register_limiter, same ballpark limit (revocation is a rare call, not a
+# routine one).
+document_revoke_limiter = WindowLimiter(SessionLocal, limit=20, window_seconds=3600)
 
 
 _PUBLIC_BASE_URL = os.environ.get("BARDO_PUBLIC_URL", "http://127.0.0.1:8000")
@@ -1539,3 +1547,101 @@ def feedback_submit(req: schemas.FeedbackCreate, sess=Depends(require_session), 
             secret=_OPERATOR_NOTIFY_SECRET,
         )
     return schemas.FeedbackAck(received=True)
+
+
+# --------------------------------------------------------------------------- #
+# documents (signed-documents.md, atrium/core/documents.py) — self-verifying,
+# VC-shaped attestations. Bardo signs and hands one back; nothing is
+# persisted except a bare revoked-id set (decision 5) — no document store, no
+# /documents list. status/revoke are deliberately public and session-less:
+# authorization is the signature itself, not an account (decision 5's
+# consequences / "Deliberately rejected: Bardo as adjudicator").
+# --------------------------------------------------------------------------- #
+_DOCUMENT_STATUS_URL = f"{_PUBLIC_BASE_URL}/documents/status"
+# How long a verifier may cache a "not revoked" answer — decision 1's
+# "cached, periodically-refreshed, not synchronous per verification" as a
+# concrete number. Our own opinionated default, not a protocol requirement.
+_DOCUMENT_STATUS_CACHE_SECONDS = 300
+
+
+@router.post("/documents/attestation")
+def document_issue(
+    req: schemas.DocumentIssueRequest, sess=Depends(require_session), db: DbSession = Depends(get_db),
+):
+    """Assemble and sign an attestation (bardo_attestation_issue). Returns
+    the full VC-shaped document — handed back, not stored, same as
+    bardo_sign itself. No response_model: the shape is externally spec-
+    defined (VC), not ours to pin to a rigid internal schema."""
+    _ensure_service_allowed(db, sess, req.service)
+    issuer_pub = crypto.signing_public_key(sess.spirit_seed, req.service)
+    try:
+        unsigned = documents.build_unsigned_attestation(
+            issuer_public_key=issuer_pub,
+            claim=req.claim,
+            subject_id=req.subject_id,
+            expires_at=req.expires_at,
+            status_check_url=_DOCUMENT_STATUS_URL,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    signature = crypto.sign(sess.spirit_seed, documents.signing_bytes(unsigned), req.service)
+    return documents.finalize_attestation(
+        unsigned,
+        signature=signature,
+        verification_method=documents.verification_method(unsigned["issuer"]),
+    )
+
+
+@router.get("/documents/status", response_model=schemas.DocumentStatusResponse)
+def document_status(id: str, response: Response, db: DbSession = Depends(get_db)):
+    """Public, unauthenticated. `id` is the document's own top-level `id`
+    field (a ni:// URI) — a query param, not a path segment, since it isn't
+    a clean one (empty-authority ni:// URIs already contain slashes)."""
+    response.headers["Cache-Control"] = f"public, max-age={_DOCUMENT_STATUS_CACHE_SECONDS}"
+    revoked = db.get(models.RevokedDocument, id) is not None
+    return schemas.DocumentStatusResponse(id=id, revoked=revoked)
+
+
+@router.post("/documents/revoke", response_model=schemas.DocumentStatusResponse)
+def document_revoke(req: schemas.DocumentRevokeRequest, request: Request, db: DbSession = Depends(get_db)):
+    """Public, unauthenticated by session — proof is a fresh signature over
+    'revoke:' + id, verified against the key the id already committed to
+    (decision 5's consequences). Resubmit the full document exactly as
+    issued; id and proof are stripped and the id is recomputed to confirm
+    the resubmission is genuinely this document's preimage before anything
+    is checked further. Idempotent: revoking an already-revoked id is a
+    no-op, not an error."""
+    ip = _client_ip(request)
+    # DBWindowHit has no per-limiter scope column — every WindowLimiter shares
+    # one table, keyed only by subject string. A bare f"ip:{ip}" here would
+    # silently share register_limiter's own bucket (identical format), so
+    # this needs its own namespace prefix to stay a genuinely separate budget.
+    if not document_revoke_limiter.allow(f"ip-docrevoke:{ip}"):
+        raise _locked(document_revoke_limiter.retry_after(f"ip-docrevoke:{ip}"))
+
+    doc = dict(req.document)
+    claimed_id = doc.pop("id", None)
+    doc.pop("proof", None)
+    if not claimed_id:
+        raise HTTPException(400, "document has no 'id'")
+    if documents.recomputed_id(doc) != claimed_id:
+        raise HTTPException(
+            400,
+            "recomputed id does not match the document's own id — submit it unmodified, exactly as issued",
+        )
+    issuer_did = doc.get("issuer")
+    if not isinstance(issuer_did, str):
+        raise HTTPException(400, "document has no 'issuer'")
+    try:
+        issuer_pub = documents.ed25519_public_key_from_did_key(issuer_did)
+    except ValueError as e:
+        raise HTTPException(400, f"malformed issuer: {e}")
+
+    signature = crypto.b64d(req.signature_b64)
+    if not crypto.verify(documents.revoke_message(claimed_id), signature, issuer_pub):
+        raise HTTPException(401, "signature does not verify against the document's issuer key")
+
+    if db.get(models.RevokedDocument, claimed_id) is None:
+        db.add(models.RevokedDocument(id=claimed_id))
+        db.commit()
+    return schemas.DocumentStatusResponse(id=claimed_id, revoked=True)

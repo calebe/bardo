@@ -8,3 +8,5 @@ pydantic>=2
 httpx
 mcp
 python-dotenv
+rfc8785
+based58

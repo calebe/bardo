@@ -217,6 +217,20 @@ class Feedback(Base):
     created_at: Mapped[float] = mapped_column(Float, default=time.time, index=True)
 
 
+class RevokedDocument(Base):
+    """A revoked signed-document id (signed-documents.md's revocation flow).
+
+    Deliberately bare — Bardo never stored the original document (decision
+    5), so there's nothing to associate a revocation with beyond the id
+    itself: no issuer, no kind, no timestamp. The check endpoint only ever
+    needs a yes/no answer to "is this id in the set."
+    """
+
+    __tablename__ = "revoked_documents"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+
+
 class DBBackoffState(Base):
     """Per-subject exponential-backoff state for the auth rate limiter.
 

@@ -389,6 +389,26 @@ class FeedbackAck(BaseModel):
     received: bool
 
 
+# -- signed documents (signed-documents.md, atrium/core/documents.py) ------- #
+class DocumentIssueRequest(BaseModel):
+    claim: dict = Field(default_factory=dict, description="Free-form claim content.")
+    subject_id: str | None = Field(None, description="did:key the claim is about, if any.")
+    expires_at: float | None = Field(None, description="-> validUntil. Omit: never expires.")
+    service: str | None = Field(None, description="Same key-selector bardo_sign already takes.")
+
+
+class DocumentRevokeRequest(BaseModel):
+    document: dict = Field(description="The full signed document, exactly as issued.")
+    signature_b64: str = Field(
+        description="A fresh signature (via bardo_sign) over 'revoke:' + the document's id."
+    )
+
+
+class DocumentStatusResponse(BaseModel):
+    id: str
+    revoked: bool
+
+
 # -- account deletion (account_delete.py) ------------------------------------ #
 class AccountDeletionConfirm(BaseModel):
     challenge_id: str
