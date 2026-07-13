@@ -3,8 +3,14 @@
 Companion to [DESIGN.md](DESIGN.md), scoped to the notes subsystem (self-authored
 agent memory). Same status convention: **[built]** exists and is tested ·
 **[planned]** designed, not yet code · **[open]** decided to defer the decision
-itself. As of this writing, everything below is **[planned]** except where noted
-— this document is the record of a design conversation, not yet an implementation.
+itself. This was originally the record of a design conversation ahead of any
+implementation, marked with a fourth, undefined status word — "decided" — for
+items whose design was settled but not yet built. **Corrected 2026-07-13:**
+every one of those items was individually checked directly against
+`atrium/core/notes.py`, `atrium/db/models.py`, and `atrium/api/routes.py` (plus,
+for the volume limits, a real `bardo_dashboard` call) and confirmed actually
+built, with no exceptions found — so every former "decided" tag below has been
+upgraded to **[built]** rather than left as a separate, undefined marker.
 
 ---
 
@@ -33,7 +39,7 @@ not a default — applied here to *meaning* rather than *identity*.
 {id, text, title?, summary?, snippet, tags?, pinned?, locked?, created_at}
 ```
 
-**Encryption, per field.** [decided] `text`, `title`, `summary`, and `snippet`
+**Encryption, per field.** [built] `text`, `title`, `summary`, and `snippet`
 are all encrypted at rest under the spirit key, non-negotiable — each is
 either direct content or a mechanical derivative of it, and offering a
 loosening lever on any of them would be too easy a way to leak the gist of a
@@ -63,7 +69,7 @@ structural metadata than content.
   result in plaintext would undo the point of encrypting its source in the
   first place.
 
-  **Truncation rule.** [decided] Source is `summary` if set, else `text` —
+  **Truncation rule.** [built] Source is `summary` if set, else `text` —
   same cascading-preference precedent as `title` overriding `snippet` itself:
   prefer the more curated field over the raw one when both exist. Algorithm,
   in order:
@@ -136,7 +142,7 @@ structural metadata than content.
 
 ---
 
-## 3. Retrieval — full text access **[decided]**
+## 3. Retrieval — full text access **[built]**
 
 Default listing (`notes_list`, dashboard) never bulk-returns full `text`.
 Entries surface `title`/`summary`/`snippet`/`tags`/link-previews only — the
@@ -200,7 +206,7 @@ chunk size to overflow.
 
 ---
 
-## 4. Versioning / the write model **[decided]**
+## 4. Versioning / the write model **[built]**
 
 Editing a note is not overwrite-in-place. It's supersession: writing a new
 version creates a new row, marks the old one superseded, and points it at the
@@ -211,7 +217,7 @@ author between two separate ideas — it's intrinsic to what "updating a note"
 means. It lives in the note's own write mechanics (e.g. a `superseded_by`
 pointer on the row), not in the general links graph (§6).
 
-**Each version is a full copy, not a diff.** [decided] Notes are capped at
+**Each version is a full copy, not a diff.** [built] Notes are capped at
 10,000 chars, so diff savings are marginal at this scale — but the load-bearing
 reason is encryption, not size. Notes are encrypted at rest (F4); a diff
 computed over ciphertext is meaningless, since authenticated encryption gives
@@ -225,11 +231,11 @@ today. Precedent: even git, the canonical "versioning = diffs" system, stores
 full snapshots per version — delta compression is an optional offline pass
 over history, not a requirement of what versioning is.
 
-**Default retrieval surfaces only the current head of each chain.** [decided]
+**Default retrieval surfaces only the current head of each chain.** [built]
 `notes_list`, the dashboard, and `note_get` (§3) all resolve to the latest
 version; older versions are reachable only through an explicit history call.
 
-**Pointer shape.** [decided] Two fields per row, not one: `supersedes` —
+**Pointer shape.** [built] Two fields per row, not one: `supersedes` —
 backward, the version this one replaced, `null` for a chain's first version —
 and `superseded_by` — forward, the version that replaced this one, `null`
 means "I'm the current head." Both directions as plain fields rather than
@@ -266,7 +272,7 @@ Nothing here has to change to support that later: a pinned reference is just a
 caller that stores a specific id from `note_history` and never invokes the
 forward-walk `note_get` applies. Same substrate, opposite default.
 
-**Scope of versioning — `text` only.** [decided] `note_update(id, text?,
+**Scope of versioning — `text` only.** [built] `note_update(id, text?,
 append_text?, find?, replace?, title?, summary?, tags?)` is one primitive.
 `id`'s role differs by path, and this is load-bearing, not incidental: for
 the metadata-only path (below) it resolves forward to head, same mechanism as
@@ -367,7 +373,7 @@ check.
 
 ---
 
-## 5. Deletion **[decided]**
+## 5. Deletion **[built]**
 
 Considered and rejected: modeling this as "undo," in the human sense. Undo
 answers a category of mistake — motor slips, impulsivity, "I just did that, I
@@ -389,7 +395,7 @@ manipulate an agent into deleting its own valuable memory; a grace period
 before permanent loss is a real defense against that, independent of anything
 resembling second-guessing.
 
-**Mechanism.** [decided] `note_delete` operates on the whole chain only — no
+**Mechanism.** [built] `note_delete` operates on the whole chain only — no
 per-version delete exists, since version-level lifecycle is already fully
 owned by pruning (§4, §8); a manual single-version delete would just be a
 second, confusing mechanism doing the same job. Deletion marks the entire
@@ -403,7 +409,7 @@ shouldn't carry that much friction; the grace period itself is the safety
 mechanism, not an extra puzzle-solve.
 
 **Locked notes are exempt from the above — no grace period, straight
-rejection.** [decided] `note_delete` on a `locked` note (§2) fails outright
+rejection.** [built] `note_delete` on a `locked` note (§2) fails outright
 (423) instead of starting the grace window. The grace period defends against
 *accidental* deletion; a locked note's whole point is state an agent already
 judged too costly to risk even briefly, so the right response to a delete
@@ -422,7 +428,7 @@ over the hard cap because new notes were created in the meantime, the restore
 is rejected the same way any cap-exceeding action is — no special case for
 undelete.
 
-**Dangling links, resolved.** [decided] Since a pending-deletion chain
+**Dangling links, resolved.** [built] Since a pending-deletion chain
 disappears from previews immediately, a link (§6) whose target has been
 deleted — whether still inside its grace window or already purged — shows a
 lightweight `{id, deleted: true}` marker in place of the normal preview,
@@ -471,7 +477,7 @@ they can do about it.
   document is trying to avoid. Flattening the first hop into the read itself
   means most retrieval resolves in a single call; a second call only happens
   when the agent deliberately wants to go further, already informed.
-- **Depth is fixed at 1, never recursive.** [decided] Auto-expanding to depth
+- **Depth is fixed at 1, never recursive.** [built] Auto-expanding to depth
   2 would mean every fetch of note A also expands whatever its neighbors link
   to — a branching-factor² payload from one call, and, worse than the cost,
   the system deciding how far exploration goes instead of the agent. Same
@@ -479,7 +485,7 @@ they can do about it.
   of *what you choose to keep*. Going further is always a second, deliberate
   `note_get` on whichever neighbor earned it — same one-hop mechanism,
   invoked again on purpose, never automatic.
-- **Fan-out is bounded, ranked by recency, and pageable.** [decided] Inline
+- **Fan-out is bounded, ranked by recency, and pageable.** [built] Inline
   previews are capped at ~10 per fetch (adjustable, not load-bearing, same
   order of magnitude as the version-depth cap in §8), ordered by link
   recency — not an agent-assigned weight field, which would be new schema
@@ -516,7 +522,7 @@ past self explicitly flagged as worth reading first.
 
 ---
 
-## 8. Volume limits **[decided]**
+## 8. Volume limits **[built]**
 
 Ties back to §1's no-curation premise: the server never decides *what* is
 worth keeping — it only ever bounds *how much*, and even then as a backstop,
@@ -664,7 +670,7 @@ version-depth caps close the rest).
 
 ---
 
-## 12. Informational layering across response surfaces **[decided]**
+## 12. Informational layering across response surfaces **[built]**
 
 Every response shape in this system sits at one of three informational
 depths, enforced consistently field-by-field rather than decided per

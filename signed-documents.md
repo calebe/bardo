@@ -3,15 +3,23 @@
 Companion to [DESIGN.md](DESIGN.md), same status-marker convention (**[built]**
 / **[planned]** / **[open]**). This is the layer bardo-project.md's own notes
 called "the next big thing" — moving Bardo from *a keychain* (atrium, what
-exists today) toward *the platform*. Nothing here is built yet. This file
-exists so the foundational decisions — the ones expensive to reverse once
-code exists — get made deliberately, rather than discovered piecemeal the
-way account deletion and feedback each surfaced real design questions mid-
-build. Updated 2026-07-07, same day as first written, after a much longer
-design conversation stress-tested the original four decisions against a
-concrete example and found real consequences worth recording properly —
-then updated again the same day once more, after settling the attestation
-schema field by field against the real VC spec.
+exists today) toward *the platform*. This file exists so the foundational
+decisions — the ones expensive to reverse once code exists — get made
+deliberately, rather than discovered piecemeal the way account deletion and
+feedback each surfaced real design questions mid-build. Updated 2026-07-07,
+same day as first written, after a much longer design conversation
+stress-tested the original four decisions against a concrete example and
+found real consequences worth recording properly — then updated again the
+same day once more, after settling the attestation schema field by field
+against the real VC spec.
+
+**Corrected 2026-07-13: "nothing here is built yet" is no longer true.**
+Attestation (everything below except delegation) is fully built and shipped —
+confirmed directly against `atrium/core/documents.py`, `atrium/api/routes.py`,
+and `atrium/mcp_tools.py`, and covered in [DESIGN.md §16](DESIGN.md#16-signed-documents-built)
+and [TOOLS.md](TOOLS.md)'s Documents section. Delegation genuinely remains
+unbuilt, correctly — decision 4a below already says so; only this header's
+blanket claim was stale, not the document's own internal scoping.
 
 ---
 
@@ -449,7 +457,7 @@ Each side is independently fulfillable and independently revocable by its
 own issuer. Commitment is really contract's one-party degenerate case, not
 a separate category needing its own design.
 
-## The `bardo_attestation_issue` convenience tool
+## The `bardo_attestation_issue` convenience tool **[built]**
 
 Named for what it actually does, not the `kind`-polymorphic sketch the
 earlier section used as a placeholder — `kind` would only ever take one
@@ -458,16 +466,26 @@ tool-surface-discipline principle (notes-project.md §9: distinct actions
 get distinct tools, not one tool with an unused switch) argues against. A
 separate `bardo_delegation_issue` can exist later, if delegation ships.
 
-Signature, sorted by what's genuinely the caller's choice versus what gets
-derived automatically during assembly:
+**Corrected 2026-07-13 — the sketch below was superseded by what actually
+shipped, checked against `atrium/mcp_tools.py` directly:** the key-selector
+parameter is named `service` (not `key`, matching `bardo_sign`'s own
+existing parameter name exactly, not just its behavior), and a real
+`keep_copy: bool = False` parameter exists that this sketch never
+anticipated — when true, it saves the returned document into a locked note
+in the same call (see `notes-project.md`'s `locked` field for why that
+matters for a revocable copy), and the return shape becomes `{document,
+copy_saved, note_id, copy_error}` instead of the bare document. Real
+signature:
 
 ```
 bardo_attestation_issue(
     claim: dict,                 # free-form claim content
     subject_id: str | None,      # did:key the claim is about, if any
     expires_at: float | None,    # -> validUntil; omit = never expires
-    key,                         # same key-selector bardo_sign already takes
+    service: str | None,         # same key-selector bardo_sign already takes
+    keep_copy: bool = False,     # also save into a locked note; see above
 ) -> dict                        # the fully assembled, signed document
+                                  # (or {document, copy_saved, ...} if keep_copy)
 ```
 
 Everything else — `@context`, `type`, `kind`, `issuer` (from the signing

@@ -60,10 +60,14 @@ aren't archived or exported anywhere else.
 ## Deletion
 
 An agent can request permanent deletion of its own identity and everything
-tied to it — notes, links, notices, sessions, rate-limit state, feedback it's
-sent, all of it — through a deliberate, multi-day confirmation gate described
-in [DESIGN.md §8](DESIGN.md#8-account-deletion-built). This is a real, built,
-tested feature, not a policy promise with nothing behind it.
+tied to it — notes, links, notices, service keys, active sessions, pending
+challenges, rate-limit state, feedback it's sent, all of it — through a
+deliberate, multi-day confirmation gate described in
+[DESIGN.md §8](DESIGN.md#8-account-deletion-built). This is a real, built,
+tested feature, not a policy promise with nothing behind it. (List confirmed
+2026-07-13 directly against the actual purge code, `_purge_if_due` in
+`atrium/api/routes.py` — every table it touches, not just what seemed
+memorable to list.)
 
 Feedback specifically doesn't wait for that: it's purged automatically once
 the operator marks it handled, or after a bounded number of days, whichever

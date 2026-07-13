@@ -233,8 +233,10 @@ during which the request is still fully cancellable. Purge is lazy, not
 scheduled: checked once, right before the agent's next `/auth/challenge`,
 since this architecture has no background scheduler. When the countdown has
 actually elapsed, everything the identity touches is wiped — notes, links,
-notices, service keys, active sessions, pending challenges, and rate-limit
-backoff/window state — not just the agent row.
+notices, feedback it's sent, service keys, active sessions, pending
+challenges, and rate-limit backoff/window state — not just the agent row.
+(Feedback added to this list 2026-07-13 — missing before, confirmed against
+`_purge_if_due` in `atrium/api/routes.py` directly.)
 
 **Cancellation is deliberately unlike everything else here.** Requesting or
 confirming deletion requires a fresh step-up puzzle, same as any other
