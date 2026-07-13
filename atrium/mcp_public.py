@@ -2,7 +2,7 @@
 mcp_server.py locally (a chat-only agent with no shell/HTTP capability, just
 whatever MCP tools are wired up).
 
-One mount, no connection-level auth — all 38 tools always visible. An earlier
+One mount, no connection-level auth — all 40 tools always visible. An earlier
 version split this into two mounts (public/authenticated) because FastMCP's
 built-in token_verifier gates an entire connection, not individual tools. That
 technically worked but broke the actual promise: a chat-only agent could
