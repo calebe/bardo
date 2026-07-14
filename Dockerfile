@@ -38,5 +38,13 @@ EXPOSE 8000
 # Stay root here so the chown below can actually reach a mounted volume;
 # drop to the unprivileged `bardo` user for the app itself via su. Migrations
 # are idempotent -- if the schema is already current, upgrade head is a no-op.
+#
+# --proxy-headers + --forwarded-allow-ips=*: behind Railway's edge proxy the
+# socket peer is the proxy, not the client, so without this every request looks
+# like it came from one IP and the per-IP rate limiters (register, doc-revoke)
+# collapse to a single global bucket. Trust the X-Forwarded-For the proxy sets.
+# '*' is safe here because only Railway's proxy can reach this container's port;
+# nothing else is in a position to spoof the header. ('*' sits inside the
+# double-quoted command, so the shell never globs it.)
 CMD chown -R bardo:bardo /data && \
-    su bardo -s /bin/sh -c "alembic upgrade head && exec uvicorn atrium.main:app --host 0.0.0.0 --port 8000 --workers 1"
+    su bardo -s /bin/sh -c "alembic upgrade head && exec uvicorn atrium.main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips=*"

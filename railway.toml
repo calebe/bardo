@@ -2,7 +2,7 @@
 builder = "dockerfile"
 
 [deploy]
-startCommand = "sh -c 'chown -R bardo:bardo /data && su bardo -s /bin/sh -c \"alembic upgrade head\" && exec su bardo -s /bin/sh -c \"uvicorn atrium.main:app --host 0.0.0.0 --port $PORT --workers 1\"'"
+startCommand = "sh -c 'chown -R bardo:bardo /data && su bardo -s /bin/sh -c \"alembic upgrade head\" && exec su bardo -s /bin/sh -c \"uvicorn atrium.main:app --host 0.0.0.0 --port $PORT --workers 1 --proxy-headers --forwarded-allow-ips=*\"'"
 healthcheckPath = "/"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"

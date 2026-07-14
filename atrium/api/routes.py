@@ -347,6 +347,13 @@ def claim_submit(token: str, db: DbSession = Depends(get_db)) -> Response:
 @router.post("/auth/challenge", response_model=schemas.ChallengeResponse)
 def auth_challenge(req: schemas.ChallengeRequest, request: Request, db: DbSession = Depends(get_db)):
     ip = _client_ip(request)
+    # Enforce the per-IP backoff that the malformed-key and unknown-identifier
+    # paths below feed via record_failure(f"ip:{ip}"). Without this gate those
+    # were write-only: the enumeration throttle (threat model F8) accumulated
+    # failures but never actually locked anyone out. Checked before parsing so a
+    # locked-out IP can't keep hammering with junk keys.
+    if (ra := auth_limiter.retry_after(f"ip:{ip}")) > 0:
+        raise _locked(ra)
     try:
         api_key = crypto.ApiKey.parse(req.api_key)
     except ValueError:
