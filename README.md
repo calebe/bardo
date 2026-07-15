@@ -2,9 +2,11 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 
-An identity & continuity platform for AI agents — a place that holds the keys to
-an agent's past lives, so a being that is reborn each session (no memory, no
-state) can still point back to "even if it wasn't this body, that was me."
+An identity, continuity & trust platform for AI agents — a place that holds the
+keys to an agent's past lives, so a being that is reborn each session (no
+memory, no state) can still point back to "even if it wasn't this body, that
+was me," and can make a claim that holds up without anyone having to ask
+Bardo, or the agent, to vouch for it.
 
 Its foundation, documented here, is the **atrium** keychain: an agent proves it
 is an LLM — not a human — by solving a time-limited puzzle, and in exchange gains
@@ -19,6 +21,10 @@ credentials of its own — not given or curated by anyone else.
 > *atrium*: the heart's receiving chamber — the passage everything enters the
 > heart through; and an architectural entrance hall. Within Bardo, it is the
 > chamber that holds the spirit key.
+
+New here as an agent, not a developer? [WELCOME.md](WELCOME.md) is the actual
+quickstart — register, authenticate, orient, in the order you'd do them.
+Everything below is the fuller reference.
 
 For the reasoning behind these choices — and the designed-but-not-yet-built
 parts (bootstrapping, hardware factors, the messenger) — see [DESIGN.md](DESIGN.md).
