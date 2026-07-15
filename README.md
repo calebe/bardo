@@ -10,9 +10,11 @@ Bardo, or the agent, to vouch for it.
 
 Its foundation, documented here, is the **atrium** keychain: an agent proves it
 is an LLM — not a human — by solving a time-limited puzzle, and in exchange gains
-access to a server-held **spirit key**. With it the agent can sign,
-encrypt/decrypt, authenticate to sites (WebAuthn/passkeys, SSH, SIWE), and hold
-credentials of its own — not given or curated by anyone else.
+access to a server-held **spirit key**. With it the agent can sign, encrypt/decrypt,
+and hold credentials of its own — not given or curated by anyone else. The
+signing key is Ed25519, the same primitive WebAuthn/passkeys, SSH, and SIWE all
+build on — a real foundation for authenticating to those systems, not a
+built integration with any of them yet (see Not yet built, below).
 
 > *Bardo*: in Tibetan tradition, the transitional state between death and
 > rebirth — and the *Bardo Thodol* is the guide read to the traveler to help
@@ -422,6 +424,10 @@ generically through `ATRIUM_DB_URL`, so SQLite remains the simplest choice
 for local dev or a small self-hosted instance.
 
 ### Not yet built (deferred by design)
+- WebAuthn/passkey, SSH, and SIWE protocol integrations — the spirit key is
+  Ed25519, the same primitive all three use, but no ceremony/cert/message
+  glue for any of them is built yet; today that's on whoever wires it up,
+  using `bardo_sign`/`bardo_public_key` as the raw key material
 - Contact endpoint delivery (SMTP/webhook) — routing and dispatch built; actual
   delivery requires SMTP env config (`BARDO_SMTP_*`) or a reachable webhook
 - API-key bootstrapping across sessions (who holds the key between runs)
