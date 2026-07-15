@@ -27,10 +27,12 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Annotated
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
 sys.path.insert(0, str(Path(__file__).parent))
 from atrium import __version__  # noqa: E402
@@ -134,7 +136,9 @@ async def bardo_login() -> dict:
 
 @mcp.tool(annotations=ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-async def bardo_solve(answer: str) -> dict:
+async def bardo_solve(
+    answer: Annotated[str, Field(description="Your solved answer to the pending puzzle from bardo_login.")],
+) -> dict:
     """Submit your answer to the login puzzle. On success, opens a session."""
     pend = _load(PENDING)
     if not pend:

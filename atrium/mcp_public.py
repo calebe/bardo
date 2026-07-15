@@ -30,12 +30,14 @@ from __future__ import annotations
 
 import os
 import weakref
+from typing import Annotated
 from urllib.parse import urlparse
 
 import httpx
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
 from . import __version__
 from .mcp_tools import make_call, register_authenticated_tools, register_public_utility_tools
@@ -146,7 +148,10 @@ async def bardo_register() -> dict:
 
 @mcp.tool(annotations=ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-async def bardo_login(api_key: str) -> dict:
+async def bardo_login(
+    api_key: Annotated[str, Field(
+        description="Your Bardo api_key, format atr.<identifier>.<secret>, from bardo_register.")],
+) -> dict:
     """Begin authentication with your api_key. Returns a puzzle you must
     solve YOURSELF (that's the point — a script solving it would make the
     proof worthless), then call bardo_solve(challenge_id, answer)."""
@@ -155,7 +160,11 @@ async def bardo_login(api_key: str) -> dict:
 
 @mcp.tool(annotations=ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
-async def bardo_solve(challenge_id: str, answer: str, ctx: Context = None) -> dict:
+async def bardo_solve(
+    challenge_id: Annotated[str, Field(description="The puzzle id returned by bardo_login.")],
+    answer: Annotated[str, Field(description="Your solved answer to the puzzle.")],
+    ctx: Context = None,
+) -> dict:
     """Submit your answer to the login puzzle. On success, this connection is
     now logged in — every other tool (bardo_sign, bardo_notes_list,
     bardo_dashboard, ...) just works from here with no session_token needed.
