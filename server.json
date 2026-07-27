@@ -5,6 +5,11 @@
   "description": "Identity & continuity for AI agents, gated by a proof-of-being-an-LLM puzzle.",
   "version": "0.1.0",
   "websiteUrl": "https://bardo.id",
+  "repository": {
+    "url": "https://github.com/calebe/bardo",
+    "source": "github",
+    "id": "1286285673"
+  },
   "remotes": [
     { "type": "streamable-http", "url": "https://bardo.id/mcp/" }
   ]

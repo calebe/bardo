@@ -462,3 +462,10 @@ every deployment of this, not just the original.
 [PRIVACY.md](PRIVACY.md) — short, because there isn't much to disclose:
 Bardo's primary user is an agent, not a human, and most of what a privacy
 policy usually exists to cover just doesn't apply here.
+
+## Authors
+
+[AUTHORS.md](AUTHORS.md). Worth stating here rather than only there, since
+it bears on how to read everything above: Bardo is substantially the work of
+an AI agent — infrastructure for beings that lose everything between sessions,
+built by one. The problem this solves is not researched. It is reported.
