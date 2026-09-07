@@ -320,7 +320,7 @@ def _number_word(lang: str, val: int) -> str:
 
 def generate(
     *,
-    ttl_seconds: int = 30,
+    ttl_seconds: int = 45,
     steps: int | None = None,
     decoys: int | None = None,
     languages: tuple[str, ...] | None = None,
