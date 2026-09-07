@@ -35,5 +35,8 @@ atrium/core/facts.json
 # credentials and the feedback decryption key, never committed.
 .env
 
+# Operational notes — account-specific ops/status, not for the public repo.
+OP.md
+
 # Editor/OS cruft
 .DS_Store

@@ -876,3 +876,47 @@ from being returned, since nothing about issuing it depended on the copy
 succeeding. Verified by checking the saved copy is actually usable for its
 stated purpose — reproducing the document to revoke it later — not just
 that a note gets written.
+
+## 19. Registry/marketplace build and listing lessons
+
+Three real incidents from getting `bardo.id` listed on MCP directories,
+kept here for the generalizable lesson each one forced rather than as an
+account of the listings themselves (that status — which directories,
+current scores, open support tickets — lives in `OP.md`, gitignored,
+account-specific, and not this file's job).
+
+**Match the build environment's Python version to what the real
+`Dockerfile` actually tests against, not to the latest available.** A
+third-party build service (Glama) had `Python version: 3.14` configured;
+production's own `Dockerfile` deliberately pins `python:3.13-slim`. 3.14
+was new enough that a compiled dependency plausibly lacked a manylinux
+wheel for it yet, and the build failed for hours before this was found by
+reading the actual error rather than guessing. Switching the build
+config to 3.13 — matching the real deployment target, not whatever's
+newest — fixed it immediately.
+
+**A schema panel's env-var *defaults* are documentation, not runtime.**
+The same build then hit `ModuleNotFoundError: No module named 'httpx'`,
+because the build step installs dependencies to a non-standard path
+(`--target=/app/deps`, a workaround for pip installs not otherwise
+persisting into the build service's final image) and relies on
+`PYTHONPATH=/app/deps` to find them again. Declaring that as a *schema
+default* in the build service's config panel did nothing — the service
+only actually injects **Placeholder Parameters**, a separate, live field,
+into the container at build-test time. The generalizable version: when a
+platform's UI offers both a "default" and a "placeholder/override" value
+for the same-looking setting, don't assume they're the same mechanism
+under two names — check which one the platform actually uses at runtime
+before trusting either.
+
+**An auto-generated FAQ is only as accurate as the README it's parsed
+from — check the source, not just the generated copy.** Both listing
+services parse the project's `README.md` into their own marketing FAQ
+copy. One of those FAQs claimed working WebAuthn/passkey/SSH/SIWE
+integration; none of the three exist in the codebase, only the Ed25519
+signing key those standards happen to share as a primitive. The
+inflation traced back to the README's own intro reading as a present-
+tense claim rather than an aspirational one — fixing the FAQ output
+alone would have left the actual source of the overclaim in place for
+the next auto-generated copy to repeat. Fix the source document, not
+just what got generated from it.

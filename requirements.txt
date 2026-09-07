@@ -6,7 +6,7 @@ alembic>=1.13
 psycopg2-binary
 pydantic>=2
 httpx
-mcp
+mcp>=1.28,<2
 python-dotenv
 rfc8785
 based58
